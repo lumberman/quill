@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Quill launcher. Pinned to the system interpreter on purpose: PyGObject and
+# gtk4-layer-shell are provided by pacman, and a mise/pyenv python would not
+# see them.
+set -euo pipefail
+
+QUILL_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+export PYTHONPATH="$QUILL_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+
+# gtk4-layer-shell must precede libwayland-client in the link order or the
+# surface silently falls back to an ordinary window. Under Python the load
+# order is decided by PyGObject, so preloading is the only lever we have.
+# https://github.com/wmww/gtk4-layer-shell/blob/main/linking.md
+if [[ -z "${QUILL_NO_PRELOAD:-}" ]]; then
+  for candidate in /usr/lib/libgtk4-layer-shell.so /usr/lib64/libgtk4-layer-shell.so; do
+    if [[ -e "$candidate" ]]; then
+      export LD_PRELOAD="$candidate${LD_PRELOAD:+:$LD_PRELOAD}"
+      break
+    fi
+  done
+fi
+
+exec /usr/bin/python3 -m quill "$@"

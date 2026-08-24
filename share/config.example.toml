@@ -1,0 +1,42 @@
+# Quill configuration — copy to ~/.config/quill/config.toml
+# Every key is optional; anything omitted falls back to the built-in default.
+
+# Any model you have pulled in Ollama. See `ollama list`.
+model = "gemma4:12b-it-qat"
+
+host = "http://127.0.0.1:11434"
+
+# How long Ollama keeps the model in VRAM after a request. Longer means the
+# next invocation answers instantly; "0" frees the GPU immediately.
+keep_alive = "30m"
+
+# Context window. Raise it if you routinely rewrite long passages.
+num_ctx = 8192
+
+request_timeout = 120.0
+
+# Put the clipboard back the way it was after replacing text.
+restore_clipboard = true
+
+# Skip the review step and paste as soon as the model finishes.
+auto_replace = false
+
+# --- Actions ---------------------------------------------------------------
+# Uncommenting ANY [[actions]] block replaces the whole default menu, so list
+# every action you want. Referencing a built-in id and omitting `instruction`
+# reuses its built-in prompt, which is handy for reordering or trimming.
+#
+# [[actions]]
+# id = "fix"                       # built-in prompt, renamed and listed first
+# label = "Spellcheck"
+#
+# [[actions]]
+# id = "translate_ru"              # a new one of your own
+# label = "Translate to Russian"
+# instruction = "Translate the text into natural, idiomatic Russian."
+# temperature = 0.2
+#
+# [[actions]]
+# id = "custom"
+# label = "Custom Instruction…"
+# prompts_for_input = true
