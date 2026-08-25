@@ -25,6 +25,9 @@ class Config:
     # Holding the model resident is what makes the second invocation feel instant.
     keep_alive: str = "30m"
     num_ctx: int = 8192
+    # False disables a thinking model's reasoning channel; None omits the
+    # field entirely, leaving the model default.
+    think: bool | None = False
     request_timeout: float = 120.0
     restore_clipboard: bool = True
     # Replace immediately instead of showing the result for review first.
@@ -93,6 +96,8 @@ def load(path: Path | None = None) -> Config:
     cfg.host = str(raw.get("host", cfg.host))
     cfg.keep_alive = str(raw.get("keep_alive", cfg.keep_alive))
     cfg.num_ctx = int(raw.get("num_ctx", cfg.num_ctx))
+    if "think" in raw:
+        cfg.think = None if raw["think"] is None else bool(raw["think"])
     cfg.request_timeout = float(raw.get("request_timeout", cfg.request_timeout))
     cfg.restore_clipboard = bool(raw.get("restore_clipboard", cfg.restore_clipboard))
     cfg.auto_replace = bool(raw.get("auto_replace", cfg.auto_replace))

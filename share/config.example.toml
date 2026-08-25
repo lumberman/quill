@@ -13,6 +13,12 @@ keep_alive = "30m"
 # Context window. Raise it if you routinely rewrite long passages.
 num_ctx = 8192
 
+# Turn off a reasoning model's thinking channel. Keep this false: editing is
+# a transformation, not a puzzle, and a thinking model can spend its entire
+# context deliberating and return nothing. Omit the key to leave the model's
+# own default alone.
+think = false
+
 request_timeout = 120.0
 
 # Put the clipboard back the way it was after replacing text.

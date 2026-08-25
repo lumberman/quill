@@ -16,6 +16,11 @@ class OllamaError(RuntimeError):
     pass
 
 
+# Set once per process: some models reject a "think" field outright, and
+# there is no capability flag to check up front.
+_THINK_FIELD_REJECTED = False
+
+
 def _get_json(url: str, timeout: float = 3.0):
     try:
         with urllib.request.urlopen(url, timeout=timeout) as resp:
@@ -45,6 +50,35 @@ def has_model(cfg: Config, model: str | None = None) -> bool:
     return any(n == target or n.split(":")[0] == base for n in names) and ":" not in target
 
 
+def _stream_response(
+    req: urllib.request.Request,
+    cfg: Config,
+    cancel: threading.Event | None,
+) -> Iterator[str]:
+    """Yield content deltas from one NDJSON streaming response."""
+    with urllib.request.urlopen(req, timeout=cfg.request_timeout) as resp:
+        for raw in resp:
+            if cancel is not None and cancel.is_set():
+                return
+            line = raw.decode("utf-8", errors="replace").strip()
+            if not line:
+                continue
+            try:
+                chunk = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if chunk.get("error"):
+                raise OllamaError(str(chunk["error"]))
+            # Deliberately ignores any "thinking" field: reasoning is not part
+            # of the answer, and requesting think=false should mean there is
+            # none to begin with.
+            delta = (chunk.get("message") or {}).get("content", "")
+            if delta:
+                yield delta
+            if chunk.get("done"):
+                return
+
+
 def stream_chat(
     cfg: Config,
     messages: list[dict],
@@ -52,6 +86,8 @@ def stream_chat(
     cancel: threading.Event | None = None,
 ) -> Iterator[str]:
     """Yield content deltas from /api/chat. Raises OllamaError on failure."""
+    global _THINK_FIELD_REJECTED
+
     payload = {
         "model": cfg.model,
         "messages": messages,
@@ -62,34 +98,38 @@ def stream_chat(
             "num_ctx": cfg.num_ctx,
         },
     }
-    req = urllib.request.Request(
-        cfg.chat_url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+    # Reasoning is actively harmful here: a rewrite needs no deliberation, and a
+    # thinking model can burn its whole context in the reasoning channel and
+    # return empty content (measured with gemma4:12b-it-qat on a one-line
+    # spellcheck: 95s, 7962 tokens, done_reason=length, no answer at all; the
+    # same call with think=false took 0.2s and 8 tokens).
+    if cfg.think is not None and not _THINK_FIELD_REJECTED:
+        payload["think"] = cfg.think
+
+    def _request(body: dict) -> urllib.request.Request:
+        return urllib.request.Request(
+            cfg.chat_url,
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
 
     try:
-        with urllib.request.urlopen(req, timeout=cfg.request_timeout) as resp:
-            for raw in resp:
-                if cancel is not None and cancel.is_set():
-                    return
-                line = raw.decode("utf-8", errors="replace").strip()
-                if not line:
-                    continue
-                try:
-                    chunk = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if chunk.get("error"):
-                    raise OllamaError(str(chunk["error"]))
-                delta = (chunk.get("message") or {}).get("content", "")
-                if delta:
-                    yield delta
-                if chunk.get("done"):
-                    return
+        yield from _stream_response(_request(payload), cfg, cancel)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:400]
+        if "think" in detail.lower() and "think" in payload:
+            # This model has no reasoning channel to switch off. Drop the field
+            # and stop sending it for the rest of the process.
+            _THINK_FIELD_REJECTED = True
+            payload.pop("think", None)
+            try:
+                yield from _stream_response(_request(payload), cfg, cancel)
+            except (urllib.error.URLError, OSError, TimeoutError) as retry_exc:
+                raise OllamaError(
+                    f"Could not reach Ollama at {cfg.host}: {retry_exc}"
+                ) from retry_exc
+            return
         raise OllamaError(f"Ollama returned HTTP {exc.code}: {detail}") from exc
     except (urllib.error.URLError, OSError, TimeoutError) as exc:
         raise OllamaError(f"Could not reach Ollama at {cfg.host}: {exc}") from exc
@@ -138,6 +178,11 @@ def clean_output(text: str, original: str = "") -> str:
     quote_pairs = (('"', '"'), ("'", "'"), ("“", "”"), ("«", "»"))
     if not any(stripped_original.startswith(o) for o, _ in quote_pairs):
         out = _strip_paired(out, quote_pairs).strip()
+
+    if not out:
+        # Never re-attach the original's whitespace to an empty result: the
+        # truthy "\n" that produces silently defeats caller fallbacks.
+        return ""
 
     # Give back the caller's own leading/trailing whitespace so pasting over a
     # selection does not silently eat an indent or a trailing space.

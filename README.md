@@ -101,6 +101,18 @@ a 16 GB GPU, all pullable with `ollama pull`:
 the model stays resident in VRAM. Set it to `"0"` to free the GPU immediately
 after each edit.
 
+### Thinking models
+
+Quill sends `think: false`. This matters more than it sounds: asked to fix one
+line of spelling, `gemma4:12b-it-qat` with reasoning enabled spent **95 seconds
+and 7962 tokens** deliberating, hit the context limit, and returned an empty
+answer. The identical request with `think: false` took **0.2 seconds and 8
+tokens**. Editing text is a transformation, not a puzzle.
+
+Models with no reasoning channel reject the field; Quill notices, drops it, and
+retries. Set `think = true` to opt back in, or omit the key to leave the model's
+default alone.
+
 ## Configuration
 
 `~/.config/quill/config.toml`, all keys optional. See
@@ -170,6 +182,9 @@ through that script rather than calling `python -m quill` directly.
 
 **First edit is slow** — that is the model loading into VRAM. Subsequent edits
 within `keep_alive` are fast.
+
+**An edit takes tens of seconds and returns nothing** — the model is reasoning
+instead of answering. Check `think` is not set to `true` in your config.
 
 ## Development
 
