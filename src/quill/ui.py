@@ -15,7 +15,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
-from . import clipboard, hypr, ollama  # noqa: E402
+from . import clipboard, hypr, ollama, state  # noqa: E402
 from .actions import Action, build_messages  # noqa: E402
 from .config import Config  # noqa: E402
 
@@ -347,6 +347,7 @@ class QuillWindow(Adw.ApplicationWindow):
         self.status_label.set_label(f"{action.label}…")
         self.replace_button.set_sensitive(False)
 
+        state.write(state.WORKING, action.label)
         self.cancel_event = threading.Event()
         messages = build_messages(action, self.source_text, self.current_custom)
         thread = threading.Thread(
@@ -378,6 +379,7 @@ class QuillWindow(Adw.ApplicationWindow):
         return False
 
     def _on_stream_done(self) -> bool:
+        state.write(state.IDLE)
         self.spinner.stop()
         final = ollama.clean_output("".join(self._result_chars), self.source_text)
         self.result_buffer.set_text(final)
@@ -390,6 +392,7 @@ class QuillWindow(Adw.ApplicationWindow):
         return False
 
     def _on_stream_error(self, message: str) -> bool:
+        state.write(state.IDLE)
         self.spinner.stop()
         self.status_label.set_label("Failed")
         self.error_label.set_label(message)
@@ -398,6 +401,7 @@ class QuillWindow(Adw.ApplicationWindow):
         return False
 
     def _cancel_stream(self) -> None:
+        state.write(state.IDLE)
         if self.cancel_event is not None:
             self.cancel_event.set()
             self.cancel_event = None

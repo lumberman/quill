@@ -4,6 +4,7 @@
 #   ./install.sh                 full install
 #   ./install.sh --no-model      skip the (large) model download
 #   ./install.sh --no-keybind    do not touch ~/.config/hypr/bindings.lua
+#   ./install.sh --no-bar-icon   do not add the icon to the Omarchy bar
 set -euo pipefail
 
 QUILL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,11 +16,13 @@ MARK_END="-- <<< quill <<<"
 
 DO_MODEL=1
 DO_KEYBIND=1
+DO_BAR=1
 for arg in "$@"; do
   case "$arg" in
     --no-model)   DO_MODEL=0 ;;
     --no-keybind) DO_KEYBIND=0 ;;
-    -h|--help)    sed -n '2,7p' "$0"; exit 0 ;;
+    --no-bar-icon) DO_BAR=0 ;;
+    -h|--help)    sed -n '2,8p' "$0"; exit 0 ;;
     *) echo "Unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -143,7 +146,61 @@ LUA
   fi
 fi
 
-# --- 7. report -------------------------------------------------------------
+# --- 7. bar icon -----------------------------------------------------------
+OMARCHY_CONFIG="$HOME/.config/omarchy"
+SHELL_JSON="$OMARCHY_CONFIG/shell.json"
+
+if ((DO_BAR)); then
+  if [[ ! -d "$OMARCHY_CONFIG" ]]; then
+    warn "No ~/.config/omarchy — skipping the bar icon"
+  else
+    mkdir -p "$OMARCHY_CONFIG/plugins"
+    # Symlink rather than copy so the plugin tracks the repo, the same way
+    # other third-party Omarchy plugins are installed.
+    ln -sfn "$QUILL_ROOT/shell-plugin" "$OMARCHY_CONFIG/plugins/quill.writer"
+    say "Linked the bar plugin"
+
+    if [[ -f "$SHELL_JSON" ]]; then
+      cp "$SHELL_JSON" "$SHELL_JSON.bak.$(date +%Y%m%d-%H%M%S)-before-quill"
+      if /usr/bin/python3 - "$SHELL_JSON" <<'PYEOF'
+import json, sys, pathlib
+
+path = pathlib.Path(sys.argv[1])
+cfg = json.loads(path.read_text())
+layout = cfg.setdefault("bar", {}).setdefault("layout", {})
+
+for section in layout.values():
+    if isinstance(section, list) and any(
+        isinstance(w, dict) and w.get("id") == "quill.writer" for w in section
+    ):
+        print("already in the bar layout")
+        raise SystemExit(1)
+
+center = layout.setdefault("center", [])
+# Sit right after the indicator cluster so it reads as one group with the
+# dictation icon rather than drifting off past the clock.
+index = next(
+    (i for i, w in enumerate(center)
+     if isinstance(w, dict) and w.get("id") == "omarchy.indicators"),
+    -1,
+)
+center.insert(index + 1 if index >= 0 else len(center),
+              {"id": "quill.writer", "command": "quill menu", "alwaysShow": True})
+
+# ensure_ascii=False matches how the shell serialises this file itself.
+path.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
+print("added to the bar layout")
+PYEOF
+      then
+        command -v omarchy-restart-shell >/dev/null && omarchy-restart-shell >/dev/null 2>&1 || true
+      fi
+    else
+      warn "No shell.json — add the \"quill.writer\" widget from the bar settings"
+    fi
+  fi
+fi
+
+# --- 8. report -------------------------------------------------------------
 echo
 "$QUILL_ROOT/bin/quill" doctor || true
 echo

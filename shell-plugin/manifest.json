@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "id": "quill.writer",
+  "name": "Quill",
+  "version": "1.0.0",
+  "author": "Vlad Mitkovsky",
+  "license": "MIT",
+  "description": "Rewrite or spellcheck the selected text with a local model",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Quill",
+    "description": "Local-AI writing assistant. Click to open the edit menu for the current selection.",
+    "category": "Status",
+    "aliases": [
+      "quill",
+      "rewrite",
+      "spellcheck",
+      "writing"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "center",
+    "defaults": {
+      "command": "quill menu",
+      "alwaysShow": true
+    },
+    "schema": [
+      {
+        "key": "command",
+        "type": "string",
+        "label": "Command",
+        "defaultValue": "quill menu",
+        "description": "Run when the icon is clicked."
+      },
+      {
+        "key": "alwaysShow",
+        "type": "boolean",
+        "label": "Always show",
+        "defaultValue": true,
+        "description": "When off, the icon only appears while Quill is working."
+      }
+    ]
+  }
+}

@@ -57,9 +57,10 @@ The installer will ask for your sudo password (to install Ollama), then:
 4. links `quill` into `~/.local/bin`,
 5. writes `~/.config/quill/config.toml`,
 6. appends the keybindings to `~/.config/hypr/bindings.lua`, backing the file up
-   first, and reloads Hyprland.
+   first, and reloads Hyprland,
+7. installs the bar icon as an Omarchy shell plugin and adds it to your bar.
 
-It is safe to re-run. Useful flags: `--no-model`, `--no-keybind`.
+It is safe to re-run. Useful flags: `--no-model`, `--no-keybind`, `--no-bar-icon`.
 
 Check the result at any time:
 
@@ -84,6 +85,25 @@ way Omasnap behaves.
 On the result panel the text is **editable** — fix a near-miss in place rather
 than re-running. `⏎` or **Replace** pastes over your selection, **Copy** puts it
 on the clipboard, **Retry** re-runs the same edit.
+
+## Bar icon
+
+Quill installs a small Omarchy shell plugin (`shell-plugin/`) that puts a
+fountain-pen nib in the bar, next to the dictation microphone:
+
+- **Click it** to open the edit menu for the current selection — same as the
+  keybinding.
+- **While a model request is running** the nib becomes a wand, so a slow edit is
+  visible from the bar.
+
+It is a third-party plugin under `~/.config/omarchy/plugins/quill.writer`, not a
+patch to `/usr/share/omarchy`, so Omarchy updates will not overwrite it. The
+widget reads `$XDG_RUNTIME_DIR/quill/state.json` through a Quickshell `FileView`;
+Quill writes that file with an atomic rename, so there is no follower process and
+no torn read.
+
+Remove it by deleting the symlink and the `quill.writer` entry from
+`~/.config/omarchy/shell.json`, then running `omarchy-restart-shell`.
 
 ## Models
 
@@ -198,6 +218,7 @@ python3 tests/paste_harness.py "txet" # a text field to test replacement into
 
 ```
 bin/quill                 launcher (pins system python, sets LD_PRELOAD)
+shell-plugin/             Omarchy bar icon (Quickshell plugin)
 src/quill/cli.py          subcommands: menu, run, filter, doctor
 src/quill/ui.py           GTK4 layer-shell popup
 src/quill/hypr.py         hyprctl: cursor, monitors, key injection, focus
@@ -205,5 +226,6 @@ src/quill/clipboard.py    selection capture and in-place replacement
 src/quill/ollama.py       streaming client + output sanitiser
 src/quill/actions.py      the edit catalogue and prompts
 src/quill/config.py       config.toml loading
+src/quill/state.py        idle/working state for the bar icon
 install.sh                one-shot installer
 ```

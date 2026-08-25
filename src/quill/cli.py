@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import os
 import signal
 import sys
 import threading
 from pathlib import Path
 
-from . import clipboard, hypr, ollama
+from . import clipboard, hypr, ollama, state
 from .actions import build_messages
 from .config import Config, config_path, load
 
@@ -68,6 +69,9 @@ def cmd_menu(args, cfg: Config) -> int:
     if _dismiss_existing():
         return 0
     _pid_file().write_text(str(os.getpid()))
+    # However this process ends -- replace, escape, crash -- the bar must
+    # not be left showing a spinner.
+    atexit.register(state.write, state.IDLE)
     try:
         win = hypr.active_window()
         text, saved = clipboard.capture_selection(win)
@@ -102,7 +106,8 @@ def cmd_run(args, cfg: Config) -> int:
 
     messages = build_messages(action, text, args.instruction or "")
     try:
-        chunks = list(ollama.stream_chat(cfg, messages, action.temperature))
+        with state.working(action.label):
+            chunks = list(ollama.stream_chat(cfg, messages, action.temperature))
     except ollama.OllamaError as exc:
         hypr.notify("Quill failed", str(exc), urgency="critical")
         return 1
@@ -135,7 +140,8 @@ def cmd_filter(args, cfg: Config) -> int:
         return 1
     messages = build_messages(action, text, args.instruction or "")
     try:
-        chunks = list(ollama.stream_chat(cfg, messages, action.temperature))
+        with state.working(action.label):
+            chunks = list(ollama.stream_chat(cfg, messages, action.temperature))
     except ollama.OllamaError:
         print(text, end="")
         return 1
