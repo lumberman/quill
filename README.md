@@ -58,7 +58,8 @@ The installer will ask for your sudo password (to install Ollama), then:
 5. writes `~/.config/quill/config.toml`,
 6. appends the keybindings to `~/.config/hypr/bindings.lua`, backing the file up
    first, and reloads Hyprland,
-7. installs the bar icon as an Omarchy shell plugin and adds it to your bar.
+7. installs the bar icon as an Omarchy shell plugin and adds it to your bar,
+8. adds a window rule so the settings window floats instead of tiling.
 
 It is safe to re-run. Useful flags: `--no-model`, `--no-keybind`, `--no-bar-icon`.
 
@@ -93,6 +94,7 @@ fountain-pen nib in the bar, next to the dictation microphone:
 
 - **Click it** to open the edit menu for the current selection — same as the
   keybinding.
+- **Right-click** for settings.
 - **While a model request is running** the nib becomes a wand, so a slow edit is
   visible from the bar.
 
@@ -132,6 +134,28 @@ tokens**. Editing text is a transformation, not a puzzle.
 Models with no reasoning channel reject the field; Quill notices, drops it, and
 retries. Set `think = true` to opt back in, or omit the key to leave the model's
 default alone.
+
+## Settings
+
+```bash
+quill settings
+```
+
+…or right-click the bar icon. A libadwaita window covering everything in the
+config file:
+
+- **Model** — picked from a list of what you actually have pulled, with a live
+  "Ollama is running · <model> is installed" check and a refresh button
+- **Keep in memory**, context window, Ollama host
+- **Let the model think first** — off by default, and the row explains why
+- **Replace without reviewing**, restore-clipboard, request timeout
+- **Menu** — rename edits, rewrite their prompts, change temperature, reorder,
+  add and remove
+
+Changes apply on **Save**; closing the window discards them. Saving rewrites
+`config.toml`, which means hand-written comments in that file are lost — the
+settings themselves survive. If you would rather keep a commented file, edit it
+by hand and leave this window alone.
 
 ## Configuration
 
@@ -227,5 +251,6 @@ src/quill/ollama.py       streaming client + output sanitiser
 src/quill/actions.py      the edit catalogue and prompts
 src/quill/config.py       config.toml loading
 src/quill/state.py        idle/working state for the bar icon
+src/quill/settings.py     libadwaita settings window
 install.sh                one-shot installer
 ```

@@ -105,3 +105,60 @@ def load(path: Path | None = None) -> Config:
     if isinstance(raw.get("actions"), list):
         cfg.actions = _parse_actions(raw["actions"], list(DEFAULT_ACTIONS))
     return cfg
+
+
+# --- writing ----------------------------------------------------------------
+# tomllib reads but cannot write, and pulling in a dependency for eight scalars
+# and one array-of-tables is not worth it.
+
+def _toml_string(value: str) -> str:
+    out = value.replace("\\", "\\\\").replace('"', '\\"')
+    out = out.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+    return f'"{out}"'
+
+
+def _toml_value(value) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return repr(value)
+    return _toml_string(str(value))
+
+
+def dumps(cfg: Config) -> str:
+    lines = [
+        "# Quill configuration.",
+        "# Written by `quill settings` -- hand-edits survive, comments do not.",
+        "",
+    ]
+    for key in ("model", "host", "keep_alive", "num_ctx", "request_timeout",
+                "restore_clipboard", "auto_replace"):
+        lines.append(f"{key} = {_toml_value(getattr(cfg, key))}")
+    if cfg.think is not None:
+        lines.append(f"think = {_toml_value(cfg.think)}")
+
+    # Only spell out the menu when it actually differs, so an untouched config
+    # keeps tracking future changes to the built-in prompts.
+    if cfg.actions != list(DEFAULT_ACTIONS):
+        for action in cfg.actions:
+            lines += [
+                "",
+                "[[actions]]",
+                f"id = {_toml_string(action.id)}",
+                f"label = {_toml_string(action.label)}",
+                f"instruction = {_toml_string(action.instruction)}",
+                f"temperature = {_toml_value(float(action.temperature))}",
+                f"prompts_for_input = {_toml_value(bool(action.prompts_for_input))}",
+            ]
+    return "\n".join(lines) + "\n"
+
+
+def save(cfg: Config, path: Path | None = None) -> Path:
+    path = path or config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(dumps(cfg), encoding="utf-8")
+    tmp.replace(path)
+    return path

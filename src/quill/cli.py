@@ -150,6 +150,12 @@ def cmd_filter(args, cfg: Config) -> int:
     return 0
 
 
+def cmd_settings(args, cfg: Config) -> int:
+    from . import settings  # imported lazily so non-GUI commands stay light
+
+    return settings.run(cfg)
+
+
 def cmd_doctor(args, cfg: Config) -> int:
     ok = True
     print(f"config       {config_path()}"
@@ -204,6 +210,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_filter.add_argument("action", nargs="?", default="fix")
     p_filter.add_argument("-i", "--instruction")
     p_filter.set_defaults(func=cmd_filter)
+
+    p_settings = sub.add_parser("settings", help="open the settings window")
+    p_settings.set_defaults(func=cmd_settings)
 
     p_doctor = sub.add_parser("doctor", help="check the install")
     p_doctor.set_defaults(func=cmd_doctor)

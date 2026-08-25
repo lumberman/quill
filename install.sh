@@ -11,6 +11,7 @@ QUILL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="$HOME/.local/bin"
 CONFIG_DIR="$HOME/.config/quill"
 BINDINGS="$HOME/.config/hypr/bindings.lua"
+HYPRLAND_LUA="$HOME/.config/hypr/hyprland.lua"
 MARK_START="-- >>> quill >>>"
 MARK_END="-- <<< quill <<<"
 
@@ -48,6 +49,24 @@ run_root() {
 MODEL="$(sed -n 's/^[[:space:]]*model[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
           "$CONFIG_DIR/config.toml" 2>/dev/null | head -1)"
 MODEL="${MODEL:-gemma4:12b-it-qat}"
+
+# Append a marked block to a Hyprland config file, once. The marker starts with
+# "--", so every grep over it needs `--` to end option parsing.
+append_hypr_block() {
+  local file="$1" what="$2" body="$3"
+  if [[ ! -f "$file" ]]; then
+    warn "$file not found — skipping $what"
+    return
+  fi
+  if grep -qF -- "$MARK_START" "$file"; then
+    say "$what already present in $(basename "$file")"
+    return
+  fi
+  local backup="$file.bak.$(date +%Y%m%d-%H%M%S)-before-quill"
+  cp "$file" "$backup"
+  say "Adding $what (backup: $(basename "$backup"))"
+  printf '\n%s\n%s\n%s\n' "$MARK_START" "$body" "$MARK_END" >> "$file"
+}
 
 # --- 1. dependencies -------------------------------------------------------
 say "Checking dependencies"
@@ -122,29 +141,30 @@ else
   say "Keeping your existing config.toml"
 fi
 
-# --- 6. keybindings --------------------------------------------------------
+# --- 6. keybindings and window rules ---------------------------------------
 if ((DO_KEYBIND)); then
-  if [[ ! -f "$BINDINGS" ]]; then
-    warn "$BINDINGS not found — skipping keybindings"
-  elif grep -qF -- "$MARK_START" "$BINDINGS"; then
-    say "Keybindings already present in bindings.lua"
-  else
-    backup="$BINDINGS.bak.$(date +%Y%m%d-%H%M%S)-before-quill"
-    cp "$BINDINGS" "$backup"
-    say "Adding keybindings (backup: $(basename "$backup"))"
-    cat >> "$BINDINGS" <<LUA
-
-$MARK_START
+  append_hypr_block "$BINDINGS" "keybindings" "$(cat <<LUA
 -- Quill: local-AI writing assistant. Select text in any app, then trigger to
 -- spellcheck or rewrite it in place. SUPER+SHIFT+right-click is used rather
 -- than SUPER+right-click so Omarchy's drag-to-resize binding stays intact.
 o.bind("SUPER + I", "Quill: AI writing menu", "$BIN_DIR/quill menu")
 o.bind("SUPER + SHIFT + mouse:273", "Quill: AI writing menu", "$BIN_DIR/quill menu")
-$MARK_END
 LUA
-    hyprctl reload >/dev/null 2>&1 || warn "Run 'hyprctl reload' to pick up the new bindings"
-  fi
+)"
+
+  # Window rules are not keybindings, so they go where the other rules live.
+  append_hypr_block "$HYPRLAND_LUA" "window rules" "$(cat <<'LUA'
+-- Quill's settings window is a dialog, not something to tile into the
+-- workspace.
+o.window("com.omarchy.Quill.Settings", { float = true })
+o.window("com.omarchy.Quill.Settings", { center = true })
+o.window("com.omarchy.Quill.Settings", { size = { 720, 840 } })
+LUA
+)"
+
+  hyprctl reload >/dev/null 2>&1 || warn "Run 'hyprctl reload' to pick up the new bindings"
 fi
+
 
 # --- 7. bar icon -----------------------------------------------------------
 OMARCHY_CONFIG="$HOME/.config/omarchy"

@@ -18,6 +18,7 @@ BarWidget {
   readonly property string workingIcon: "󰁨"
 
   readonly property string command: String(setting("command", "quill menu"))
+  readonly property string settingsCommand: String(setting("settingsCommand", "quill settings"))
   readonly property bool alwaysShow: setting("alwaysShow", true) === true
 
   property string state: "idle"
@@ -61,7 +62,12 @@ BarWidget {
     fontSize: Style.font.caption
     tooltipText: root.working
       ? (root.detail !== "" ? "Quill: " + root.detail + "\u2026" : "Quill: working\u2026")
-      : "Quill"
-    onPressed: if (root.bar) root.bar.run(root.command)
+      : "Quill  \u00b7  right-click for settings"
+    // WidgetButton emits pressed(int button); right-click opens settings,
+    // matching how the other bar widgets separate action from configuration.
+    onPressed: function(button) {
+      if (!root.bar) return
+      root.bar.run(button === Qt.RightButton ? root.settingsCommand : root.command)
+    }
   }
 }
