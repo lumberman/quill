@@ -226,6 +226,9 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._refresh_status()
 
     # -- model -------------------------------------------------------------
+    # `think` is deliberately not exposed here. There is one correct value for
+    # an editing tool and the switch was only ever a foot-gun; it stays
+    # hand-editable in config.toml for anyone who needs it.
     def _build_model_group(self) -> None:
         group = Adw.PreferencesGroup(title="Local model (Ollama)")
         self.model_group = group
@@ -248,15 +251,6 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.keep_alive_row.set_model(Gtk.StringList.new(self.keep_alive_values))
         self.keep_alive_row.set_selected(self.keep_alive_values.index(self.cfg.keep_alive))
         group.add(self.keep_alive_row)
-
-        self.think_row = Adw.SwitchRow(
-            title="Let the model think first",
-            subtitle="Off is strongly recommended. Reasoning models can spend "
-                     "their whole context deliberating over a one-line edit and "
-                     "return nothing at all.",
-        )
-        self.think_row.set_active(bool(self.cfg.think))
-        group.add(self.think_row)
 
         self.ctx_row = Adw.SpinRow(
             title="Context window",
@@ -490,7 +484,6 @@ class SettingsWindow(Adw.ApplicationWindow):
         cfg.keep_alive = (self.keep_alive_values[index]
                           if 0 <= index < len(self.keep_alive_values)
                           else self.cfg.keep_alive)
-        cfg.think = self.think_row.get_active()
         cfg.num_ctx = int(self.ctx_row.get_value())
         cfg.auto_replace = self.auto_row.get_active()
         cfg.restore_clipboard = self.clipboard_row.get_active()
