@@ -8,6 +8,7 @@ the two would mean one class juggling two very different lifecycles.
 from __future__ import annotations
 
 import threading
+import time
 import traceback
 from dataclasses import replace
 
@@ -16,14 +17,51 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Adw", "1")
+gi.require_version("Gdk", "4.0")
 
-from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from . import config as config_mod  # noqa: E402
 from . import codex, credentials, hypr, models, ollama, openai_api, openrouter  # noqa: E402
-from . import clipboard, provider  # noqa: E402
-from .actions import DEFAULT_ACTIONS, Action  # noqa: E402
+from . import clipboard, provider, sanitize  # noqa: E402
+from .actions import DEFAULT_ACTIONS, Action, build_messages  # noqa: E402
 from .config import CODEX, OLLAMA, OPENAI, OPENROUTER, Config  # noqa: E402
+
+CSS = """
+.quill-hero {
+  padding: 22px 12px 18px 12px;
+}
+.quill-chord {
+  font-size: 2.6em;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+}
+.quill-chord-secondary {
+  font-size: 1.05em;
+  font-weight: 700;
+  opacity: 0.85;
+}
+.quill-sample text {
+  background: transparent;
+}
+.quill-sample-frame {
+  border: 1px solid alpha(currentColor, 0.16);
+  border-radius: 9px;
+  padding: 8px 10px;
+}
+.quill-result-frame {
+  border: 1px solid alpha(@accent_bg_color, 0.45);
+  background-color: alpha(@accent_bg_color, 0.10);
+  border-radius: 9px;
+  padding: 8px 10px;
+}
+.quill-step {
+  font-weight: 700;
+  font-size: 0.78em;
+  opacity: 0.55;
+  letter-spacing: 0.8px;
+}
+"""
 
 KEEP_ALIVE_HINT = ("How long the model stays in VRAM. Longer keeps repeat "
                    "edits instant; 0 frees the GPU immediately.")
@@ -60,6 +98,8 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.page = Adw.PreferencesPage()
         self.toasts.set_child(self.page)
 
+        self._build_hero()
+        self._build_tutorial()
         self._build_shortcuts_group()
         self._build_provider_group()
         self._build_openai_group()
@@ -84,6 +124,168 @@ class SettingsWindow(Adw.ApplicationWindow):
         ("\u21b5 / Esc", "Replace the selection / close"),
     ]
 
+    def _build_hero(self) -> None:
+        """The one thing to remember, at the size of the thing to remember."""
+        group = Adw.PreferencesGroup()
+        self.page.add(group)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        box.add_css_class("quill-hero")
+        box.set_halign(Gtk.Align.CENTER)
+
+        binds = hypr.binds_matching("quill")
+        primary = next((c for c, w in binds if "menu" in w.lower()), "Super + I")
+        secondary = next((c for c, w in binds if "menu" not in w.lower()), None)
+
+        chord = Gtk.Label(label=primary)
+        chord.add_css_class("quill-chord")
+        chord.add_css_class("accent")
+        box.append(chord)
+
+        caption = Gtk.Label(label="Select text in any app, then press this")
+        caption.add_css_class("body")
+        caption.add_css_class("dim-label")
+        box.append(caption)
+
+        if secondary:
+            extra = Gtk.Label(label=f"{secondary}  ·  fix grammar in place, no popup")
+            extra.add_css_class("caption")
+            extra.add_css_class("dim-label")
+            extra.set_margin_top(8)
+            box.append(extra)
+
+        group.add(box)
+
+    # -- interactive tutorial ----------------------------------------------
+    SAMPLE = "i has recieved you're mesage yesterday and we was gonna reply."
+
+    def _build_tutorial(self) -> None:
+        group = Adw.PreferencesGroup(
+            title="Try it here",
+            description="This runs the real model, exactly as the shortcut would.",
+        )
+        self.page.add(group)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_margin_top(6)
+        box.set_margin_bottom(6)
+
+        step1 = Gtk.Label(label="1  PRETEND YOU SELECTED THIS", xalign=0)
+        step1.add_css_class("quill-step")
+        box.append(step1)
+
+        self.sample_view = Gtk.TextView()
+        self.sample_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self.sample_view.add_css_class("quill-sample")
+        self.sample_view.get_buffer().set_text(self.SAMPLE)
+        frame = Gtk.Box()
+        frame.add_css_class("quill-sample-frame")
+        frame.append(self.sample_view)
+        self.sample_view.set_hexpand(True)
+        box.append(frame)
+
+        step2 = Gtk.Label(label="2  RUN AN EDIT", xalign=0)
+        step2.add_css_class("quill-step")
+        step2.set_margin_top(6)
+        box.append(step2)
+
+        controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.try_button = Gtk.Button()
+        self.try_button.set_child(Adw.ButtonContent(
+            icon_name="tools-check-spelling-symbolic",
+            label="Fix spelling & grammar"))
+        self.try_button.add_css_class("suggested-action")
+        self.try_button.connect("clicked", lambda *_: self._run_tutorial())
+        controls.append(self.try_button)
+
+        self.try_spinner = Gtk.Spinner()
+        self.try_spinner.set_valign(Gtk.Align.CENTER)
+        controls.append(self.try_spinner)
+
+        self.try_status = Gtk.Label(label="", xalign=0)
+        self.try_status.add_css_class("caption")
+        self.try_status.add_css_class("dim-label")
+        self.try_status.set_valign(Gtk.Align.CENTER)
+        controls.append(self.try_status)
+        box.append(controls)
+
+        step3 = Gtk.Label(label="3  QUILL REPLACES YOUR SELECTION WITH THIS", xalign=0)
+        step3.add_css_class("quill-step")
+        step3.set_margin_top(6)
+        box.append(step3)
+
+        self.try_result = Gtk.Label(label="—", xalign=0, wrap=True)
+        self.try_result.add_css_class("body")
+        result_frame = Gtk.Box()
+        result_frame.add_css_class("quill-result-frame")
+        result_frame.append(self.try_result)
+        self.try_result.set_hexpand(True)
+        box.append(result_frame)
+
+        group.add(box)
+
+    def _run_tutorial(self) -> None:
+        buffer = self.sample_view.get_buffer()
+        text = buffer.get_text(*buffer.get_bounds(), False).strip()
+        if not text:
+            self._toast("Type something to edit first")
+            return
+
+        cfg = self._collect()
+        usable, reason = provider.ready(cfg)
+        if not usable:
+            self.try_status.set_label(reason)
+            return
+
+        self.try_button.set_sensitive(False)
+        self.try_spinner.start()
+        self.try_status.set_label(f"{provider.label(cfg)}…")
+        self.try_result.set_label("—")
+
+        # A cold model can take 20s+ to load. Saying so beats a mute spinner.
+        self._try_running = True
+
+        def explain_the_wait():
+            if getattr(self, "_try_running", False):
+                self.try_status.set_label(
+                    "Loading the model into memory — the first edit after a "
+                    "restart is slow, later ones are not.")
+            return False
+
+        GLib.timeout_add_seconds(3, explain_the_wait)
+
+        action = cfg.action("fix")
+        messages = build_messages(action, text)
+
+        def worker():
+            start = time.monotonic()
+            try:
+                chunks = list(provider.stream_chat(cfg, messages, action.temperature))
+                out = sanitize.clean_output("".join(chunks), text)
+                GLib.idle_add(self._tutorial_done, out, time.monotonic() - start, None)
+            except provider.ProviderError as exc:
+                GLib.idle_add(self._tutorial_done, "", 0.0, str(exc))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    @staticmethod
+    def _format_duration(seconds: float) -> str:
+        return f"{seconds:.1f} s" if seconds >= 1 else f"{seconds * 1000:.0f} ms"
+
+    def _tutorial_done(self, out: str, seconds: float, error: str | None) -> bool:
+        self._try_running = False
+        self.try_spinner.stop()
+        self.try_button.set_sensitive(True)
+        if error:
+            self.try_status.set_label(error)
+            return False
+        self.try_result.set_label(out or "(the model returned nothing)")
+        took = self._format_duration(seconds)
+        self.try_status.set_label(
+            f"took {took} — that first one included loading the model"
+            if seconds >= 3 else f"took {took}")
+        return False
+
     def _build_shortcuts_group(self) -> None:
         """Reference, not a setting.
 
@@ -96,6 +298,7 @@ class SettingsWindow(Adw.ApplicationWindow):
 
         expander = Adw.ExpanderRow(title="Shortcuts")
         expander.set_use_markup(False)
+        expander.add_prefix(Gtk.Image.new_from_icon_name("input-keyboard-symbolic"))
         group.add(expander)
 
         # Several chords can share one description; list them on one line
@@ -129,6 +332,8 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.page.add(group)
 
         self.provider_row = Adw.ComboRow(title="Provider")
+        self.provider_row.add_prefix(
+            Gtk.Image.new_from_icon_name("network-server-symbolic"))
         self.provider_order = [OLLAMA, OPENAI, CODEX, OPENROUTER]
         self.provider_row.set_model(Gtk.StringList.new([
             "On this machine (Ollama)",
@@ -146,11 +351,15 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.privacy_row = Adw.ActionRow()
         self.privacy_row.set_use_markup(False)
         self.privacy_row.set_title("Privacy")
+        self.privacy_row.add_prefix(
+            Gtk.Image.new_from_icon_name("security-high-symbolic"))
         group.add(self.privacy_row)
 
         self.status_row = Adw.ActionRow()
         self.status_row.set_use_markup(False)
         self.status_row.set_title("Status")
+        self.status_icon = Gtk.Image.new_from_icon_name("emblem-ok-symbolic")
+        self.status_row.add_prefix(self.status_icon)
         refresh = Gtk.Button(icon_name="view-refresh-symbolic")
         refresh.set_valign(Gtk.Align.CENTER)
         refresh.add_css_class("flat")
@@ -461,6 +670,8 @@ class SettingsWindow(Adw.ApplicationWindow):
 
         self.model_row = Adw.ComboRow(title="Model")
         self.model_row.set_use_markup(False)
+        self.model_row.add_prefix(
+            Gtk.Image.new_from_icon_name("applications-science-symbolic"))
         self.model_row.connect("notify::selected", lambda *_: self._on_model_changed())
         group.add(self.model_row)
 
@@ -479,10 +690,13 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.detail_row = Adw.ActionRow()
         self.detail_row.set_use_markup(False)
         self.detail_row.set_title("What that means")
+        self.detail_row.add_prefix(
+            Gtk.Image.new_from_icon_name("dialog-information-symbolic"))
         group.add(self.detail_row)
 
         # Tuning knobs almost nobody touches, folded away by default.
         advanced = Adw.ExpanderRow(title="Advanced")
+        advanced.add_prefix(Gtk.Image.new_from_icon_name("preferences-system-symbolic"))
         group.add(advanced)
 
         self.host_row = Adw.EntryRow(title="Ollama host")
@@ -573,8 +787,10 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.status_row.set_subtitle(reason)
         if usable:
             self.status_row.remove_css_class("error")
+            self.status_icon.set_from_icon_name("emblem-ok-symbolic")
         else:
             self.status_row.add_css_class("error")
+            self.status_icon.set_from_icon_name("dialog-warning-symbolic")
 
     def _selected_model(self) -> str:
         """The model id, not the label shown in the dropdown."""
@@ -592,6 +808,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             title="Replace without reviewing",
             subtitle="Paste as soon as the model finishes, skipping the result panel.",
         )
+        self.auto_row.add_prefix(Gtk.Image.new_from_icon_name("document-edit-symbolic"))
         self.auto_row.set_active(self.cfg.auto_replace)
         group.add(self.auto_row)
 
@@ -599,10 +816,12 @@ class SettingsWindow(Adw.ApplicationWindow):
             title="Restore the clipboard",
             subtitle="Put back whatever was on the clipboard after replacing text.",
         )
+        self.clipboard_row.add_prefix(Gtk.Image.new_from_icon_name("edit-copy-symbolic"))
         self.clipboard_row.set_active(self.cfg.restore_clipboard)
         group.add(self.clipboard_row)
 
         advanced = Adw.ExpanderRow(title="Advanced")
+        advanced.add_prefix(Gtk.Image.new_from_icon_name("preferences-system-symbolic"))
         group.add(advanced)
 
         self.timeout_row = Adw.SpinRow(
@@ -803,6 +1022,13 @@ class SettingsWindow(Adw.ApplicationWindow):
 def run(cfg: Config) -> int:
     app = Adw.Application(application_id="com.omarchy.Quill.Settings",
                           flags=Gio.ApplicationFlags.FLAGS_NONE)
+
+    provider_css = Gtk.CssProvider()
+    provider_css.load_from_data(CSS.encode("utf-8"))
+    display = Gdk.Display.get_default()
+    if display is not None:
+        Gtk.StyleContext.add_provider_for_display(
+            display, provider_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
     def on_activate(application):
         # A unique application id means a second launch focuses this window
