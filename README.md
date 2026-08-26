@@ -265,6 +265,25 @@ Two environment variables exist for testing and self-hosted proxies:
 
 ## Models
 
+Settings has a **Model** dropdown. It lists what you have pulled, recommended
+models first, and explains the trade-off for whichever one is selected — size,
+typical latency, and how it scored on Quill's own benchmark
+(`tests/bench_tasks.py`, 14 tasks covering every edit plus Chinese and Russian
+translation, markdown preservation and fact retention):
+
+| Model | Size | Per edit | Score | |
+|---|---|---|---|---|
+| `gemma4:12b-it-qat` | 7.2 GB | ~315 ms | **13/14** | Best quality. Gets proper nouns, agreement and non-English orthography right. |
+| `granite4.1:3b` | 2.1 GB | ~113 ms | 10/14 | Nearly 3× faster. Sometimes leaves a sentence uncapitalised and is weaker on Russian and Chinese. |
+
+Both feel instant. The larger one makes fewer mistakes, and matters most if you
+edit Chinese or Russian.
+
+Models below ~3B were measured and rejected: `qwen3:0.6b`, `llama3.2:1b`,
+`gemma3:270m` and `smollm2:135m` all scored 1/4 on grammar — they fix spelling
+and leave the grammar alone. The dropdown marks them so choosing one is not a
+neutral-looking decision.
+
 Anything in `ollama list` works — set `model` in the config. Sensible choices for
 a 16 GB GPU, all pullable with `ollama pull`:
 

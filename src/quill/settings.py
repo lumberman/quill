@@ -8,6 +8,7 @@ the two would mean one class juggling two very different lifecycles.
 from __future__ import annotations
 
 import threading
+import traceback
 from dataclasses import replace
 
 import gi
@@ -19,7 +20,8 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
 from . import config as config_mod  # noqa: E402
-from . import codex, credentials, hypr, ollama, openai_api, openrouter, provider  # noqa: E402
+from . import codex, credentials, hypr, models, ollama, openai_api, openrouter  # noqa: E402
+from . import clipboard, provider  # noqa: E402
 from .actions import DEFAULT_ACTIONS, Action  # noqa: E402
 from .config import CODEX, OLLAMA, OPENAI, OPENROUTER, Config  # noqa: E402
 
@@ -35,6 +37,10 @@ class SettingsWindow(Adw.ApplicationWindow):
         # Edited as plain dataclasses and only written back on Save, so
         # Cancel-by-closing leaves the file untouched.
         self.draft_actions: list[Action] = list(cfg.actions)
+        # _collect() reads every widget, so anything that calls it must wait
+        # until construction has finished. Guarding on individual widgets meant
+        # tracking build order by hand, which broke as soon as it changed.
+        self._ready = False
 
         self.set_default_size(660, 780)
 
@@ -62,6 +68,8 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._build_model_group()
         self._build_behaviour_group()
         self._build_actions_group()
+
+        self._ready = True
         self._sync_account_row()
         self._sync_provider()
 
@@ -71,31 +79,40 @@ class SettingsWindow(Adw.ApplicationWindow):
     # In-app bindings are fixed, so they are listed literally; the Hyprland
     # chords are read live, because the user may well have rebound them.
     IN_APP_SHORTCUTS = [
-        ("Click the bar icon", "Settings (this window)"),
-        ("Right-click the bar icon", "Run an edit on the selection"),
-        ("1 – 9", "Run that edit straight from the menu"),
-        ("\u2191 \u2193  then  \u21b5", "Pick an edit and run it"),
-        ("\u21b5", "Replace the selection with the result"),
-        ("Esc", "Back to the menu, then close"),
+        ("Click / right-click the bar icon", "Settings / run an edit"),
+        ("1\u20139,  \u2191\u2193 then \u21b5", "Pick an edit in the menu"),
+        ("\u21b5 / Esc", "Replace the selection / close"),
     ]
 
     def _build_shortcuts_group(self) -> None:
-        group = Adw.PreferencesGroup(
-            title="Shortcuts",
-            description="The result panel is editable — fix a near-miss in place "
-                        "rather than re-running it.",
-        )
+        """Reference, not a setting.
+
+        This used to be eight always-open rows, which pushed the thing people
+        actually come here to change below the fold. It is now one row: the two
+        chords that matter are in the subtitle, the rest is one click away.
+        """
+        group = Adw.PreferencesGroup()
         self.page.add(group)
 
-        rows: list[tuple[str, str]] = []
-        for chord, what in hypr.binds_matching("quill"):
-            rows.append((chord, what[0].upper() + what[1:] if what else "Open Quill"))
-        if not rows:
-            # Hyprland unreachable, or the keybindings were never installed.
-            rows.append(("Super + I", "AI writing menu (not currently bound)"))
-        rows += self.IN_APP_SHORTCUTS
+        expander = Adw.ExpanderRow(title="Shortcuts")
+        expander.set_use_markup(False)
+        group.add(expander)
 
-        for chord, what in rows:
+        # Several chords can share one description; list them on one line
+        # rather than repeating the description per chord.
+        grouped: dict[str, list[str]] = {}
+        for chord, what in hypr.binds_matching("quill"):
+            label = what[0].upper() + what[1:] if what else "Open Quill"
+            grouped.setdefault(label, []).append(chord)
+        rows = [(",  ".join(chords), label) for label, chords in grouped.items()]
+        if not rows:
+            rows.append(("Super + I", "Not currently bound"))
+
+        headline = "  ·  ".join(f"{chord} — {label.lower()}"
+                                for chord, label in rows[:2])
+        expander.set_subtitle(headline or "Keyboard and mouse")
+
+        for chord, what in rows + self.IN_APP_SHORTCUTS:
             row = Adw.ActionRow()
             row.set_use_markup(False)
             row.set_title(what)
@@ -104,7 +121,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             label.add_css_class("monospace")
             label.add_css_class("dim-label")
             row.add_suffix(label)
-            group.add(row)
+            expander.add_row(row)
 
     # -- provider ----------------------------------------------------------
     def _build_provider_group(self) -> None:
@@ -150,12 +167,16 @@ class SettingsWindow(Adw.ApplicationWindow):
         return OLLAMA
 
     def _sync_provider(self) -> None:
-        """Grey out the groups that are not in use, rather than hiding them."""
+        """Show only the backend in use.
+
+        Everything still exists, so _collect() can read it; it is just not on
+        screen competing with the settings the user opened this window for.
+        """
         active = self._provider_value()
-        self.openrouter_group.set_sensitive(active == OPENROUTER)
-        self.openai_group.set_sensitive(active == OPENAI)
-        self.codex_group.set_sensitive(active == CODEX)
-        self.model_group.set_sensitive(active == OLLAMA)
+        self.openrouter_group.set_visible(active == OPENROUTER)
+        self.openai_group.set_visible(active == OPENAI)
+        self.codex_group.set_visible(active == CODEX)
+        self.model_group.set_visible(active == OLLAMA)
 
         probe = replace(self.cfg, provider=active,
                         openai_base_url=self._openai_base_url())
@@ -434,18 +455,39 @@ class SettingsWindow(Adw.ApplicationWindow):
     # an editing tool and the switch was only ever a foot-gun; it stays
     # hand-editable in config.toml for anyone who needs it.
     def _build_model_group(self) -> None:
-        group = Adw.PreferencesGroup(title="Local model (Ollama)")
+        group = Adw.PreferencesGroup(title="Local model")
         self.model_group = group
         self.page.add(group)
 
         self.model_row = Adw.ComboRow(title="Model")
-        self.model_row.set_subtitle("Anything you have pulled in Ollama")
+        self.model_row.set_use_markup(False)
+        self.model_row.connect("notify::selected", lambda *_: self._on_model_changed())
         group.add(self.model_row)
-        self._reload_model_list()
+
+        # Shown when a model Quill has actually measured is not installed, with
+        # the one command needed to get it.
+        self.pull_row = Adw.ActionRow()
+        self.pull_row.set_use_markup(False)
+        copy_pull = Gtk.Button(icon_name="edit-copy-symbolic")
+        copy_pull.set_valign(Gtk.Align.CENTER)
+        copy_pull.add_css_class("flat")
+        copy_pull.set_tooltip_text("Copy the pull command")
+        copy_pull.connect("clicked", lambda *_: self._copy_pull_command())
+        self.pull_row.add_suffix(copy_pull)
+        group.add(self.pull_row)
+
+        self.detail_row = Adw.ActionRow()
+        self.detail_row.set_use_markup(False)
+        self.detail_row.set_title("What that means")
+        group.add(self.detail_row)
+
+        # Tuning knobs almost nobody touches, folded away by default.
+        advanced = Adw.ExpanderRow(title="Advanced")
+        group.add(advanced)
 
         self.host_row = Adw.EntryRow(title="Ollama host")
         self.host_row.set_text(self.cfg.host)
-        group.add(self.host_row)
+        advanced.add_row(self.host_row)
 
         self.keep_alive_row = Adw.ComboRow(title="Keep in memory")
         self.keep_alive_row.set_subtitle(KEEP_ALIVE_HINT)
@@ -454,7 +496,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             self.keep_alive_values.insert(0, self.cfg.keep_alive)
         self.keep_alive_row.set_model(Gtk.StringList.new(self.keep_alive_values))
         self.keep_alive_row.set_selected(self.keep_alive_values.index(self.cfg.keep_alive))
-        group.add(self.keep_alive_row)
+        advanced.add_row(self.keep_alive_row)
 
         self.ctx_row = Adw.SpinRow(
             title="Context window",
@@ -463,20 +505,58 @@ class SettingsWindow(Adw.ApplicationWindow):
                 value=self.cfg.num_ctx,
             ),
         )
-        group.add(self.ctx_row)
+        advanced.add_row(self.ctx_row)
+
+        self._reload_model_list()
 
     def _reload_model_list(self) -> None:
-        names = ollama.installed_models(self.cfg)
+        installed = ollama.installed_models(self.cfg)
         # Keep the configured model selectable even when Ollama is unreachable
         # or the model was removed, so opening settings never silently changes it.
-        if self.cfg.model not in names:
-            names.insert(0, self.cfg.model)
-        self.model_names = names or [self.cfg.model]
-        self.model_row.set_model(Gtk.StringList.new(self.model_names))
+        if self.cfg.model not in installed:
+            installed.append(self.cfg.model)
+        self.model_ids = models.ordered(installed)
+        self.model_row.set_model(
+            Gtk.StringList.new([models.label_for(m) for m in self.model_ids]))
         try:
-            self.model_row.set_selected(self.model_names.index(self.cfg.model))
+            self.model_row.set_selected(self.model_ids.index(self.cfg.model))
         except ValueError:
             self.model_row.set_selected(0)
+        self._on_model_changed()
+        self._sync_pull_row(installed)
+
+    def _on_model_changed(self) -> None:
+        """Explain the trade-off for whatever is selected, in place."""
+        selected = self._selected_model()
+        self.model_row.set_subtitle(models.describe(selected))
+        detail = models.detail(selected)
+        self.detail_row.set_subtitle(detail or models.COMPARISON)
+        self.detail_row.set_visible(True)
+        note = models.note_for(selected)
+        if note and note.tier == models.UNSUITED:
+            self.model_row.add_css_class("error")
+        else:
+            self.model_row.remove_css_class("error")
+        self._refresh_status()
+
+    def _sync_pull_row(self, installed: list[str]) -> None:
+        missing = models.missing_recommendation(installed)
+        if not missing:
+            self.pull_row.set_visible(False)
+            return
+        note = models.note_for(missing)
+        self.pull_row.set_visible(True)
+        self.pull_row.set_title(f"Not installed: {missing}")
+        self.pull_row.set_subtitle(
+            f"{note.summary}\nollama pull {missing}" if note
+            else f"ollama pull {missing}")
+        self._pull_command = f"ollama pull {missing}"
+
+    def _copy_pull_command(self) -> None:
+        command = getattr(self, "_pull_command", "")
+        if command:
+            clipboard.set_clipboard(command)
+            self._toast("Command copied")
 
     def _refresh_all(self) -> None:
         self._sync_codex_row()
@@ -484,8 +564,8 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._refresh_status(reload_models=True)
 
     def _refresh_status(self, reload_models: bool = False) -> None:
-        if not hasattr(self, "status_row"):
-            return  # called from _sync_provider before the model group exists
+        if not self._ready:
+            return
         if reload_models:
             self._reload_model_list()
         probe = self._collect()
@@ -497,9 +577,10 @@ class SettingsWindow(Adw.ApplicationWindow):
             self.status_row.add_css_class("error")
 
     def _selected_model(self) -> str:
+        """The model id, not the label shown in the dropdown."""
         index = self.model_row.get_selected()
-        if 0 <= index < len(self.model_names):
-            return self.model_names[index]
+        if 0 <= index < len(self.model_ids):
+            return self.model_ids[index]
         return self.cfg.model
 
     # -- behaviour ---------------------------------------------------------
@@ -521,14 +602,17 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.clipboard_row.set_active(self.cfg.restore_clipboard)
         group.add(self.clipboard_row)
 
+        advanced = Adw.ExpanderRow(title="Advanced")
+        group.add(advanced)
+
         self.timeout_row = Adw.SpinRow(
-            title="Request timeout (seconds)",
+            title="Give up after (seconds)",
             adjustment=Gtk.Adjustment(
                 lower=10, upper=600, step_increment=10, page_increment=30,
                 value=self.cfg.request_timeout,
             ),
         )
-        group.add(self.timeout_row)
+        advanced.add_row(self.timeout_row)
 
     # -- actions -----------------------------------------------------------
     def _build_actions_group(self) -> None:
@@ -719,5 +803,22 @@ class SettingsWindow(Adw.ApplicationWindow):
 def run(cfg: Config) -> int:
     app = Adw.Application(application_id="com.omarchy.Quill.Settings",
                           flags=Gio.ApplicationFlags.FLAGS_NONE)
-    app.connect("activate", lambda a: SettingsWindow(a, cfg).present())
+
+    def on_activate(application):
+        # A unique application id means a second launch focuses this window
+        # instead of opening a rival one.
+        existing = application.get_active_window()
+        if existing is not None:
+            existing.present()
+            return
+        try:
+            SettingsWindow(application, cfg).present()
+        except Exception:
+            # Without this the app keeps running windowless, holding the DBus
+            # name, and every later `quill settings` silently activates the
+            # corpse instead of opening a window.
+            traceback.print_exc()
+            application.quit()
+
+    app.connect("activate", on_activate)
     return app.run([])
