@@ -15,7 +15,7 @@ BarWidget {
   moduleName: "quill.writer"
 
   readonly property string idleIcon: "󰴓"
-  readonly property string workingIcon: "󰁨"
+  readonly property string workingIcon: ""
 
   readonly property string command: String(setting("command", "quill menu"))
   readonly property string settingsCommand: String(setting("settingsCommand", "quill settings"))
@@ -69,6 +69,20 @@ BarWidget {
     onPressed: function(button) {
       if (!root.bar) return
       root.bar.run(button === Qt.RightButton ? root.command : root.settingsCommand)
+    }
+
+    // Spin the glyph while a model request is in flight. WidgetButton exposes
+    // textRotation for exactly this, so no extra item is needed.
+    NumberAnimation {
+      target: button
+      property: "textRotation"
+      from: 0
+      to: 360
+      duration: 1100
+      loops: Animation.Infinite
+      running: root.working
+      // Leaving it mid-turn would tilt the idle pen nib.
+      onRunningChanged: if (!running) button.textRotation = 0
     }
   }
 }

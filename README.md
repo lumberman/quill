@@ -94,6 +94,7 @@ quill doctor
 |---|---|
 | `SUPER + I` | Open the Quill menu at the cursor |
 | `SUPER + SHIFT + right-click` | Same, from the mouse |
+| `SUPER + SHIFT + I` | **Invisible mode** — fix grammar in place, no popup |
 
 `SUPER + SHIFT + right-click` rather than plain `SUPER + right-click` because
 Omarchy binds the latter to drag-to-resize windows; this leaves that intact.
@@ -109,6 +110,32 @@ way Omasnap behaves.
 On the result panel the text is **editable** — fix a near-miss in place rather
 than re-running. `⏎` or **Replace** pastes over your selection, **Copy** puts it
 on the clipboard, **Retry** re-runs the same edit.
+
+## Invisible mode
+
+`SUPER + SHIFT + I` runs one edit straight over the selection. No popup, no
+result panel, no confirmation — the text just changes.
+
+Feedback while it works is deliberately peripheral:
+
+- a notification naming the edit and the backend, which closes itself the moment
+  the text is replaced,
+- the bar icon becomes a spinning circle and returns to the pen nib when done.
+
+If the model decides nothing needed changing, you get a brief *"no changes
+needed"* instead of silence — otherwise a no-op is indistinguishable from a
+failure. Errors replace the same notification rather than stacking a second one.
+
+Bind a different one-shot edit by changing the action id:
+
+```lua
+o.bind("SUPER + SHIFT + I", "Quill: Fix grammar in place",
+       "/home/you/.local/bin/quill run fix")
+o.bind("SUPER + ALT + I", "Quill: Make it shorter",
+       "/home/you/.local/bin/quill run shorter")
+```
+
+Add `--quiet` to drop the notification, e.g. for scripts.
 
 ## Bar icon
 

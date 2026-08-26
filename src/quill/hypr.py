@@ -125,17 +125,51 @@ def focus_window(address: str) -> bool:
     return bool(_run(["hyprctl", "dispatch", "focuswindow", f"address:{address}"]))
 
 
-def notify(summary: str, body: str = "", urgency: str = "normal") -> None:
+def notify(summary: str, body: str = "", urgency: str = "normal",
+           replace_id: int | None = None, transient: bool = False,
+           timeout_ms: int | None = None, want_id: bool = False) -> int | None:
+    """Show a desktop notification. Returns its id when want_id is set.
+
+    The id lets a long-running action update one notification in place instead
+    of stacking several.
+    """
     args = [
         "notify-send",
         "-a", "Quill",
         "-u", urgency,
         "-i", "accessories-text-editor",
-        summary,
     ]
+    if replace_id:
+        args += ["-r", str(replace_id)]
+    if transient:
+        args.append("-e")
+    if timeout_ms is not None:
+        args += ["-t", str(timeout_ms)]
+    if want_id:
+        args.append("-p")
+    args.append(summary)
     if body:
         args.append(body)
-    _run(args)
+    out = _run(args)
+    if not want_id:
+        return None
+    try:
+        return int(out.strip().splitlines()[0])
+    except (ValueError, IndexError):
+        return None
+
+
+def close_notification(notification_id: int | None) -> None:
+    """notify-send cannot close, so go to the daemon directly."""
+    if not notification_id:
+        return
+    _run([
+        "gdbus", "call", "--session",
+        "--dest", "org.freedesktop.Notifications",
+        "--object-path", "/org/freedesktop/Notifications",
+        "--method", "org.freedesktop.Notifications.CloseNotification",
+        str(notification_id),
+    ])
 
 
 # Modifier bits as Hyprland reports them in `hyprctl binds -j`.

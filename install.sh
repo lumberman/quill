@@ -149,6 +149,9 @@ if ((DO_KEYBIND)); then
 -- than SUPER+right-click so Omarchy's drag-to-resize binding stays intact.
 o.bind("SUPER + I", "Quill: Open the edit menu", "$BIN_DIR/quill menu")
 o.bind("SUPER + SHIFT + mouse:273", "Quill: Open the edit menu", "$BIN_DIR/quill menu")
+-- Invisible mode: fix the selection in place, no popup. Change "fix" to any
+-- other action id to bind a different one-shot edit.
+o.bind("SUPER + SHIFT + I", "Quill: Fix grammar in place", "$BIN_DIR/quill run fix")
 LUA
 )"
 

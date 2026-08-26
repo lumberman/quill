@@ -81,11 +81,17 @@ def cmd_menu(args, cfg: Config) -> int:
 
 
 def cmd_run(args, cfg: Config) -> int:
-    """Apply one action straight to the selection, no menu."""
+    """Apply one action straight to the selection: no menu, no result panel.
+
+    The only feedback is a notification while the model works and the bar icon
+    spinning, because the point of this path is not to interrupt anything.
+    """
     action = cfg.action(args.action)
     if action is None:
         print(f"Unknown action: {args.action}", file=sys.stderr)
         return 2
+    quiet = getattr(args, "quiet", False)
+
     win = hypr.active_window()
     text, saved = clipboard.capture_selection(win)
     if not text.strip():
@@ -94,20 +100,43 @@ def cmd_run(args, cfg: Config) -> int:
     if not _preflight(cfg):
         return 1
 
+    notice = None
+    if not quiet:
+        notice = hypr.notify(
+            f"Quill · {action.label}",
+            provider.label(cfg),
+            transient=True,
+            # Long enough to outlive a slow backend; closed explicitly below.
+            timeout_ms=120000,
+            want_id=True,
+        )
+
     messages = build_messages(action, text, args.instruction or "")
     try:
         with state.working(action.label):
             chunks = list(provider.stream_chat(cfg, messages, action.temperature))
     except provider.ProviderError as exc:
-        hypr.notify("Quill failed", str(exc), urgency="critical")
+        hypr.notify("Quill failed", str(exc), urgency="critical",
+                    replace_id=notice)
         return 1
 
     result = sanitize.clean_output("".join(chunks), text)
     if not result.strip():
-        hypr.notify("Quill: empty result")
+        hypr.notify("Quill: the model returned nothing",
+                    "Nothing was replaced.", urgency="critical",
+                    replace_id=notice)
         return 1
+
+    if result.strip() == text.strip():
+        # Say so, or a no-op looks identical to a failure.
+        hypr.notify("Quill: no changes needed", action.label,
+                    replace_id=notice, transient=True, timeout_ms=2000)
+        return 0
+
     clipboard.replace_selection(result, win, saved,
                                 restore_clipboard=cfg.restore_clipboard)
+    # The text visibly changing is the confirmation; anything more is noise.
+    hypr.close_notification(notice)
     return 0
 
 
@@ -261,6 +290,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_run = sub.add_parser("run", help="apply one action to the selection")
     p_run.add_argument("action", help="action id, e.g. fix or rewrite")
     p_run.add_argument("-i", "--instruction", help="instruction for the custom action")
+    p_run.add_argument("-q", "--quiet", action="store_true",
+                       help="no progress notification")
     p_run.set_defaults(func=cmd_run)
 
     p_filter = sub.add_parser("filter", help="stdin -> stdout, for other tools")
