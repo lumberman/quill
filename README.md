@@ -6,9 +6,15 @@ edit, and Quill replaces the selection in place.
 
 By default everything runs on your own machine through
 [Ollama](https://ollama.com): no text leaves the computer and it works offline.
-You can also point it at [OpenRouter](https://openrouter.ai) to use hosted
-models, including its free tier — that does send the selected text off the
-machine, and Quill says so in the settings window.
+Four backends are available, and the settings window always states whether the
+selected text stays local:
+
+| Backend | Cost | Text leaves the machine |
+|---|---|---|
+| **Ollama** (default) | free | no |
+| **OpenAI-compatible server** | free locally | only if the URL is remote |
+| **ChatGPT subscription** via Codex CLI | your existing plan | yes |
+| **OpenRouter** | free tier or paid | yes |
 
 ```
 Fix Spelling & Grammar   Rewrite for Clarity   Make It Shorter
@@ -119,6 +125,62 @@ no torn read.
 
 Remove it by deleting the symlink and the `quill.writer` entry from
 `~/.config/omarchy/shell.json`, then running `omarchy-restart-shell`.
+
+## Using your ChatGPT subscription
+
+If you pay for ChatGPT, you can run edits on that plan instead of buying API
+tokens separately. Quill drives [OpenAI's own Codex
+CLI](https://developers.openai.com/codex/cli), which supports signing in with a
+ChatGPT account:
+
+```bash
+codex login            # once — "Logged in using ChatGPT"
+```
+
+Then pick **ChatGPT subscription (Codex CLI)** in settings, or set
+`provider = "codex"`. Quill checks `auth_mode` in `~/.codex/auth.json` and tells
+you in settings whether you are on a subscription or an API key, because the
+second one *is* billed per token.
+
+This is the sanctioned route: OpenAI's own client, OpenAI's own OAuth, under
+their terms. Quill does not touch ChatGPT's private web endpoints and does not
+reuse browser session cookies — that would breach OpenAI's terms of service, and
+no amount of convenience is worth building on something that can be shut off or
+get an account banned.
+
+Trade-offs worth knowing:
+
+- **Slower.** An agent process starts per edit, so expect a few seconds against
+  a fraction of one locally.
+- **No streaming.** The CLI hands back a final message, so the result appears all
+  at once. Quill shows a spinner instead of pretending otherwise.
+- **Quota, not tokens.** Edits count against your plan's rate limits.
+
+Quill runs Codex with `--sandbox read-only`, `--ephemeral`,
+`--ignore-user-config` and `--ignore-rules`, rooted at an empty temp directory,
+so an unrelated `AGENTS.md` cannot change how your text is edited and the agent
+has nothing of yours to read.
+
+## Using a local OpenAI-compatible server
+
+Anything exposing `/v1/chat/completions` works — LM Studio, llama.cpp's server,
+vLLM, LocalAI — as does `api.openai.com` itself. Pick a preset in settings or set
+the base URL by hand:
+
+```toml
+provider = "openai"
+openai_base_url = "http://127.0.0.1:1234/v1"   # LM Studio
+openai_model = "your-model-id"
+```
+
+An API key is only required when the URL is not loopback; the settings window
+says which. Keys are stored the same way as the OpenRouter one, never in
+`config.toml`.
+
+If you point this at Ollama, prefer the **Ollama** provider instead. This API has
+no agreed way to switch off reasoning, and there is no field every server
+accepts — strict ones reject unknown keys with a 400. On the same machine and
+model, a one-line edit measured 8.3s through `/v1` against 0.28s natively.
 
 ## Using OpenRouter instead
 
@@ -311,6 +373,9 @@ src/quill/hypr.py         hyprctl: cursor, monitors, key injection, focus
 src/quill/clipboard.py    selection capture and in-place replacement
 src/quill/ollama.py       Ollama streaming client
 src/quill/openrouter.py   OpenRouter client + OAuth PKCE sign-in
+src/quill/openai_api.py   any OpenAI-compatible server
+src/quill/openai_compat.py shared /chat/completions streaming
+src/quill/codex.py        ChatGPT subscription via the Codex CLI
 src/quill/provider.py     backend dispatch
 src/quill/credentials.py  API key storage (keyring, else 0600 file)
 src/quill/sanitize.py     output sanitiser (provider-neutral)

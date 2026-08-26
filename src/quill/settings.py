@@ -19,9 +19,9 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
 from . import config as config_mod  # noqa: E402
-from . import credentials, ollama, openrouter, provider  # noqa: E402
+from . import codex, credentials, ollama, openai_api, openrouter, provider  # noqa: E402
 from .actions import DEFAULT_ACTIONS, Action  # noqa: E402
-from .config import OLLAMA, OPENROUTER, Config  # noqa: E402
+from .config import CODEX, OLLAMA, OPENAI, OPENROUTER, Config  # noqa: E402
 
 KEEP_ALIVE_HINT = ("How long the model stays in VRAM. Longer keeps repeat "
                    "edits instant; 0 frees the GPU immediately.")
@@ -55,6 +55,8 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.toasts.set_child(self.page)
 
         self._build_provider_group()
+        self._build_openai_group()
+        self._build_codex_group()
         self._build_openrouter_group()
         self._build_model_group()
         self._build_behaviour_group()
@@ -69,11 +71,17 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.page.add(group)
 
         self.provider_row = Adw.ComboRow(title="Provider")
+        self.provider_order = [OLLAMA, OPENAI, CODEX, OPENROUTER]
         self.provider_row.set_model(Gtk.StringList.new([
             "On this machine (Ollama)",
+            "OpenAI-compatible server",
+            "ChatGPT subscription (Codex CLI)",
             "OpenRouter (cloud)",
         ]))
-        self.provider_row.set_selected(1 if self.cfg.uses_openrouter else 0)
+        try:
+            self.provider_row.set_selected(self.provider_order.index(self.cfg.provider))
+        except ValueError:
+            self.provider_row.set_selected(0)
         self.provider_row.connect("notify::selected", lambda *_: self._sync_provider())
         group.add(self.provider_row)
 
@@ -89,25 +97,38 @@ class SettingsWindow(Adw.ApplicationWindow):
         refresh.set_valign(Gtk.Align.CENTER)
         refresh.add_css_class("flat")
         refresh.set_tooltip_text("Re-check the backend")
-        refresh.connect("clicked", lambda *_: self._refresh_status(reload_models=True))
+        refresh.connect("clicked", lambda *_: self._refresh_all())
         self.status_row.add_suffix(refresh)
         group.add(self.status_row)
 
 
     def _provider_value(self) -> str:
-        return OPENROUTER if self.provider_row.get_selected() == 1 else OLLAMA
+        index = self.provider_row.get_selected()
+        if 0 <= index < len(self.provider_order):
+            return self.provider_order[index]
+        return OLLAMA
 
     def _sync_provider(self) -> None:
-        """Grey out the group that is not in use, rather than hiding it."""
-        using_openrouter = self._provider_value() == OPENROUTER
-        self.openrouter_group.set_sensitive(using_openrouter)
-        self.model_group.set_sensitive(not using_openrouter)
-        self.privacy_row.set_subtitle(
-            "Selected text is sent to OpenRouter and to whichever provider "
-            "serves the model. Free models are often trained on."
-            if using_openrouter else
-            "Nothing leaves this machine."
-        )
+        """Grey out the groups that are not in use, rather than hiding them."""
+        active = self._provider_value()
+        self.openrouter_group.set_sensitive(active == OPENROUTER)
+        self.openai_group.set_sensitive(active == OPENAI)
+        self.codex_group.set_sensitive(active == CODEX)
+        self.model_group.set_sensitive(active == OLLAMA)
+
+        probe = replace(self.cfg, provider=active,
+                        openai_base_url=self._openai_base_url())
+        if probe.is_local:
+            note = "Nothing leaves this machine."
+        elif active == CODEX:
+            note = ("Selected text is sent to OpenAI through the Codex CLI, "
+                    "using your ChatGPT subscription rather than metered tokens.")
+        elif active == OPENROUTER:
+            note = ("Selected text is sent to OpenRouter and to whichever "
+                    "provider serves the model. Free models are often trained on.")
+        else:
+            note = f"Selected text is sent to {self._openai_base_url()}."
+        self.privacy_row.set_subtitle(note)
         self._refresh_status()
 
     # -- openrouter --------------------------------------------------------
@@ -225,6 +246,148 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._reload_openrouter_models()
         self._refresh_status()
 
+
+    # -- openai-compatible -------------------------------------------------
+    def _build_openai_group(self) -> None:
+        self.openai_group = Adw.PreferencesGroup(
+            title="OpenAI-compatible server",
+            description=("LM Studio, llama.cpp, vLLM, LocalAI — or api.openai.com. "
+                         "If you are pointing this at Ollama, prefer the Ollama "
+                         "provider instead: this API has no way to switch off "
+                         "reasoning, which makes short edits much slower."),
+        )
+        self.page.add(self.openai_group)
+
+        self.preset_row = Adw.ComboRow(title="Preset")
+        self.preset_names = ["Custom…"] + list(openai_api.PRESETS)
+        self.preset_row.set_model(Gtk.StringList.new(self.preset_names))
+        self.preset_row.connect("notify::selected", lambda *_: self._apply_preset())
+        self.openai_group.add(self.preset_row)
+
+        self.base_url_row = Adw.EntryRow(title="Base URL")
+        self.base_url_row.set_text(self.cfg.openai_base_url)
+        self.base_url_row.connect("changed", lambda *_: self._sync_openai_key_row())
+        self.openai_group.add(self.base_url_row)
+
+        self.openai_model_row = Adw.EntryRow(title="Model")
+        self.openai_model_row.set_text(self.cfg.openai_model)
+        self.openai_group.add(self.openai_model_row)
+
+        self.openai_key_row = Adw.PasswordEntryRow(title="API key")
+        save_key = Gtk.Button(label="Save key")
+        save_key.set_valign(Gtk.Align.CENTER)
+        save_key.connect("clicked", lambda *_: self._save_openai_key())
+        self.openai_key_row.add_suffix(save_key)
+        self.openai_group.add(self.openai_key_row)
+
+        fetch = Gtk.Button(label="List models")
+        fetch.set_valign(Gtk.Align.CENTER)
+        fetch.connect("clicked", lambda *_: self._list_openai_models())
+        self.openai_models_row = Adw.ActionRow()
+        self.openai_models_row.set_use_markup(False)
+        self.openai_models_row.set_title("Available models")
+        self.openai_models_row.set_subtitle("Not checked yet")
+        self.openai_models_row.add_suffix(fetch)
+        self.openai_group.add(self.openai_models_row)
+
+        self._sync_openai_key_row()
+
+    def _openai_base_url(self) -> str:
+        return self.base_url_row.get_text().strip() or self.cfg.openai_base_url
+
+    def _apply_preset(self) -> None:
+        index = self.preset_row.get_selected()
+        if index <= 0:
+            return
+        name = self.preset_names[index]
+        self.base_url_row.set_text(openai_api.PRESETS[name])
+        self._sync_openai_key_row()
+
+    def _sync_openai_key_row(self) -> None:
+        needs = openai_api.needs_key(self._openai_base_url())
+        stored = openai_api.key_source()
+        self.openai_key_row.set_visible(True)
+        if stored:
+            self.openai_key_row.set_title(f"API key (stored in {stored})")
+        else:
+            self.openai_key_row.set_title(
+                "API key" if needs else "API key (usually not needed locally)")
+
+    def _save_openai_key(self) -> None:
+        value = self.openai_key_row.get_text().strip()
+        if not value:
+            openai_api.forget_key()
+            self._toast("API key cleared")
+        else:
+            where = openai_api.store_key(value)
+            self._toast(f"Key saved to {where}")
+        self.openai_key_row.set_text("")
+        self._sync_openai_key_row()
+        self._refresh_status()
+
+    def _list_openai_models(self) -> None:
+        probe = self._collect()
+        try:
+            names = openai_api.models(probe)
+        except openai_api.OpenAIError as exc:
+            self.openai_models_row.set_subtitle(str(exc))
+            return
+        self.openai_models_row.set_subtitle(
+            ", ".join(names[:6]) + (f" … ({len(names)} total)" if len(names) > 6 else "")
+            if names else "The server reported no models"
+        )
+
+    # -- codex -------------------------------------------------------------
+    def _build_codex_group(self) -> None:
+        self.codex_group = Adw.PreferencesGroup(
+            title="ChatGPT subscription",
+            description=(
+                "Runs edits through OpenAI's own Codex CLI, signed in with your "
+                "ChatGPT account. That bills against your plan instead of "
+                "metered API tokens."
+            ),
+        )
+        self.page.add(self.codex_group)
+
+        self.codex_status_row = Adw.ActionRow()
+        self.codex_status_row.set_use_markup(False)
+        self.codex_status_row.set_title("Codex CLI")
+        signin = Gtk.Button(label="Sign in")
+        signin.set_valign(Gtk.Align.CENTER)
+        signin.connect("clicked", lambda *_: self._codex_login())
+        self.codex_status_row.add_suffix(signin)
+        self.codex_group.add(self.codex_status_row)
+
+        self.codex_model_row = Adw.EntryRow(title="Model (blank = Codex default)")
+        self.codex_model_row.set_text(self.cfg.codex_model)
+        self.codex_group.add(self.codex_model_row)
+
+        speed = Adw.ActionRow()
+        speed.set_use_markup(False)
+        speed.set_title("Note")
+        speed.set_subtitle(
+            "Slower than the other backends — an agent process starts per edit, "
+            "so expect a few seconds, and the result appears all at once."
+        )
+        self.codex_group.add(speed)
+        self._sync_codex_row()
+
+    def _sync_codex_row(self) -> None:
+        self.codex_status_row.set_subtitle(codex.describe())
+
+    def _codex_login(self) -> None:
+        # Codex owns this flow; launching its own login is better than
+        # reimplementing an OAuth dance we would have to keep in sync.
+        exe = codex.binary()
+        if not exe:
+            self._toast("Codex CLI is not installed")
+            return
+        Gio.Subprocess.new(
+            ["omarchy-launch-floating-terminal-with-presentation", f"{exe} login"],
+            Gio.SubprocessFlags.NONE,
+        )
+        self._toast("Finish signing in, then press the refresh button")
+
     # -- model -------------------------------------------------------------
     # `think` is deliberately not exposed here. There is one correct value for
     # an editing tool and the switch was only ever a foot-gun; it stays
@@ -273,6 +436,11 @@ class SettingsWindow(Adw.ApplicationWindow):
             self.model_row.set_selected(self.model_names.index(self.cfg.model))
         except ValueError:
             self.model_row.set_selected(0)
+
+    def _refresh_all(self) -> None:
+        self._sync_codex_row()
+        self._sync_openai_key_row()
+        self._refresh_status(reload_models=True)
 
     def _refresh_status(self, reload_models: bool = False) -> None:
         if not hasattr(self, "status_row"):
@@ -479,6 +647,10 @@ class SettingsWindow(Adw.ApplicationWindow):
         cfg.model = self._selected_model()
         cfg.openrouter_model = self._selected_openrouter_model()
         cfg.openrouter_free_only = self.free_row.get_active()
+        cfg.openai_base_url = self._openai_base_url()
+        cfg.openai_model = (self.openai_model_row.get_text().strip()
+                            or self.cfg.openai_model)
+        cfg.codex_model = self.codex_model_row.get_text().strip()
         cfg.host = self.host_row.get_text().strip() or self.cfg.host
         index = self.keep_alive_row.get_selected()
         cfg.keep_alive = (self.keep_alive_values[index]

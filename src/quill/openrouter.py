@@ -22,7 +22,7 @@ import webbrowser
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from . import credentials
+from . import credentials, openai_compat
 
 ACCOUNT = "openrouter"
 # Overridable so the flow can be exercised against a local stand-in, and so a
@@ -136,54 +136,19 @@ def stream_chat(cfg, messages: list[dict], temperature: float = 0.2,
         "stream": True,
         "temperature": temperature,
         # Same rationale as Ollama's think=false: an edit is a transformation,
-        # and reasoning tokens are latency we pay for and then throw away.
+        # and reasoning tokens are latency we pay for and then discard.
         "reasoning": {"exclude": True},
     }
-    req = urllib.request.Request(
-        f"{API_BASE}/chat/completions",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={**_HEADERS, "Authorization": f"Bearer {api_key}"},
-        method="POST",
-    )
-
+    request = openai_compat.build_request(
+        API_BASE, "/chat/completions", payload, api_key, _HEADERS)
     try:
-        with urllib.request.urlopen(req, timeout=cfg.request_timeout) as resp:
-            for raw in resp:
-                if cancel is not None and cancel.is_set():
-                    return
-                line = raw.decode("utf-8", errors="replace").strip()
-                # OpenRouter sends ": OPENROUTER PROCESSING" keep-alive comments.
-                if not line or line.startswith(":"):
-                    continue
-                if not line.startswith("data:"):
-                    continue
-                data = line[5:].strip()
-                if data == "[DONE]":
-                    return
-                try:
-                    chunk = json.loads(data)
-                except json.JSONDecodeError:
-                    continue
-                if chunk.get("error"):
-                    raise OpenRouterError(str(chunk["error"]))
-                for choice in chunk.get("choices") or []:
-                    delta = (choice.get("delta") or {}).get("content")
-                    if delta:
-                        yield delta
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:400]
-        if exc.code in (401, 403):
-            raise OpenRouterError(
-                "OpenRouter rejected the API key. Sign in again from settings."
-            ) from exc
-        if exc.code == 429:
-            raise OpenRouterError(
-                "OpenRouter rate limit reached. Free models are throttled — wait, "
-                "or switch to the local model."
-            ) from exc
-        raise OpenRouterError(f"OpenRouter returned HTTP {exc.code}: {detail}") from exc
-    except (urllib.error.URLError, OSError, TimeoutError) as exc:
-        raise OpenRouterError(f"Could not reach OpenRouter: {exc}") from exc
+        yield from openai_compat.stream_completion(
+            request, cfg.request_timeout, cancel, service="OpenRouter")
+    except openai_compat.CompatError as exc:
+        message = str(exc)
+        if "rejected the API key" in message:
+            message += " Sign in again from settings."
+        raise OpenRouterError(message) from exc
 
 
 # --- sign-in ----------------------------------------------------------------

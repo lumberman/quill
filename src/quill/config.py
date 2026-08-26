@@ -13,9 +13,13 @@ DEFAULT_MODEL = "gemma4:12b-it-qat"
 DEFAULT_HOST = "http://127.0.0.1:11434"
 DEFAULT_OPENROUTER_MODEL = "z-ai/glm-5.2:free"
 
+DEFAULT_OPENAI_BASE_URL = "http://127.0.0.1:1234/v1"
+
 OLLAMA = "ollama"
 OPENROUTER = "openrouter"
-PROVIDERS = (OLLAMA, OPENROUTER)
+OPENAI = "openai"
+CODEX = "codex"
+PROVIDERS = (OLLAMA, OPENROUTER, OPENAI, CODEX)
 
 
 def config_path() -> Path:
@@ -44,6 +48,11 @@ class Config:
     # not lose the other one's choice.
     openrouter_model: str = DEFAULT_OPENROUTER_MODEL
     openrouter_free_only: bool = True
+    # Any OpenAI-compatible server: LM Studio, llama.cpp, vLLM, api.openai.com.
+    openai_base_url: str = DEFAULT_OPENAI_BASE_URL
+    openai_model: str = "local-model"
+    # Empty means "whatever Codex is configured to use".
+    codex_model: str = ""
     actions: list[Action] = field(default_factory=lambda: list(DEFAULT_ACTIONS))
 
     @property
@@ -51,9 +60,33 @@ class Config:
         return self.provider == OPENROUTER
 
     @property
+    def uses_openai(self) -> bool:
+        return self.provider == OPENAI
+
+    @property
+    def uses_codex(self) -> bool:
+        return self.provider == CODEX
+
+    @property
+    def is_local(self) -> bool:
+        """Whether the selected backend keeps the text on this machine."""
+        if self.provider == OLLAMA:
+            return True
+        if self.provider == OPENAI:
+            from .openai_api import needs_key
+            return not needs_key(self.openai_base_url)
+        return False
+
+    @property
     def active_model(self) -> str:
         """The model actually in play, whichever backend is selected."""
-        return self.openrouter_model if self.uses_openrouter else self.model
+        if self.uses_openrouter:
+            return self.openrouter_model
+        if self.uses_openai:
+            return self.openai_model
+        if self.uses_codex:
+            return self.codex_model or "codex default"
+        return self.model
 
     @property
     def chat_url(self) -> str:
@@ -119,6 +152,9 @@ def load(path: Path | None = None) -> Config:
     cfg.openrouter_model = str(raw.get("openrouter_model", cfg.openrouter_model))
     cfg.openrouter_free_only = bool(
         raw.get("openrouter_free_only", cfg.openrouter_free_only))
+    cfg.openai_base_url = str(raw.get("openai_base_url", cfg.openai_base_url))
+    cfg.openai_model = str(raw.get("openai_model", cfg.openai_model))
+    cfg.codex_model = str(raw.get("codex_model", cfg.codex_model))
     cfg.host = str(raw.get("host", cfg.host))
     cfg.keep_alive = str(raw.get("keep_alive", cfg.keep_alive))
     cfg.num_ctx = int(raw.get("num_ctx", cfg.num_ctx))
@@ -161,7 +197,8 @@ def dumps(cfg: Config) -> str:
     ]
     for key in ("provider", "model", "host", "keep_alive", "num_ctx",
                 "request_timeout", "restore_clipboard", "auto_replace",
-                "openrouter_model", "openrouter_free_only"):
+                "openrouter_model", "openrouter_free_only",
+                "openai_base_url", "openai_model", "codex_model"):
         lines.append(f"{key} = {_toml_value(getattr(cfg, key))}")
     if cfg.think is not None:
         lines.append(f"think = {_toml_value(cfg.think)}")

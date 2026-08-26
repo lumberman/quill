@@ -10,7 +10,9 @@ import sys
 import threading
 from pathlib import Path
 
-from . import clipboard, hypr, ollama, openrouter, provider, sanitize, state
+from . import clipboard, codex, hypr, ollama, openai_api, openrouter
+from . import config as config_mod
+from . import provider, sanitize, state
 from .actions import build_messages
 from .config import Config, config_path, load
 
@@ -179,6 +181,18 @@ def cmd_models(args, cfg: Config) -> int:
             marker = "free" if model["free"] else "paid"
             print(f"{model['id']:<52} {marker:>4}  ctx={model['context_length']}")
         return 0
+    if cfg.uses_openai:
+        try:
+            for name in openai_api.models(cfg):
+                print(name)
+        except openai_api.OpenAIError as exc:
+            print(f"{exc}", file=sys.stderr)
+            return 1
+        return 0
+    if cfg.uses_codex:
+        print("Codex chooses its own model; set codex_model to override.")
+        print(codex.describe())
+        return 0
     for name in ollama.installed_models(cfg):
         print(name)
     return 0
@@ -195,12 +209,17 @@ def cmd_doctor(args, cfg: Config) -> int:
     print(f"config       {config_path()}"
           f"{'' if config_path().exists() else '  (not created, using defaults)'}")
     print(f"provider     {cfg.provider}")
+    print(f"model        {cfg.active_model}")
+    print(f"text stays local  {'yes' if cfg.is_local else 'NO — sent to the provider'}")
     if cfg.uses_openrouter:
-        print(f"model        {cfg.openrouter_model}")
         print(f"api key      {openrouter.key_source() or 'NOT CONNECTED'}")
+    elif cfg.uses_openai:
+        print(f"base url     {cfg.openai_base_url}")
+        print(f"api key      {openai_api.key_source() or '(none stored)'}")
+    elif cfg.uses_codex:
+        print(f"codex        {codex.describe()}")
     else:
         print(f"host         {cfg.host}")
-        print(f"model        {cfg.model}")
 
     import shutil
     optional = {"ollama", "secret-tool"}
@@ -215,7 +234,7 @@ def cmd_doctor(args, cfg: Config) -> int:
     print(f"backend      {reason}")
     ok = ok and usable
 
-    if not cfg.uses_openrouter and ollama.is_up(cfg):
+    if cfg.provider == config_mod.OLLAMA and ollama.is_up(cfg):
         names = ollama.installed_models(cfg)
         print(f"installed    {', '.join(names) if names else '(none)'}")
 
