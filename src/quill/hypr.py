@@ -136,3 +136,41 @@ def notify(summary: str, body: str = "", urgency: str = "normal") -> None:
     if body:
         args.append(body)
     _run(args)
+
+
+# Modifier bits as Hyprland reports them in `hyprctl binds -j`.
+_MODS = [(64, "Super"), (4, "Ctrl"), (8, "Alt"), (1, "Shift")]
+_MOUSE_NAMES = {"mouse:272": "Left-click", "mouse:273": "Right-click",
+                "mouse:274": "Middle-click"}
+
+
+def _format_chord(modmask: int, key: str) -> str:
+    parts = [name for bit, name in _MODS if modmask & bit]
+    parts.append(_MOUSE_NAMES.get(key, key))
+    return " + ".join(parts)
+
+
+def binds_matching(needle: str) -> list[tuple[str, str]]:
+    """(chord, description) for bindings whose description mentions `needle`.
+
+    Read live rather than hardcoded, so the settings window stays truthful when
+    the user rebinds something in bindings.lua.
+    """
+    binds = _json(["hyprctl", "binds", "-j"])
+    if not isinstance(binds, list):
+        return []
+    out = []
+    seen = set()
+    for bind in binds:
+        description = str(bind.get("description") or "")
+        if needle.lower() not in description.lower():
+            continue
+        chord = _format_chord(int(bind.get("modmask") or 0),
+                             str(bind.get("key") or ""))
+        if chord in seen:
+            continue
+        seen.add(chord)
+        # Strip the "Quill: " prefix; the group heading already says Quill.
+        label = description.split(":", 1)[1].strip() if ":" in description else description
+        out.append((chord, label))
+    return out

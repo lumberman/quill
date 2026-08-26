@@ -54,6 +54,10 @@ class Config:
     # Empty means "whatever Codex is configured to use".
     codex_model: str = ""
     actions: list[Action] = field(default_factory=lambda: list(DEFAULT_ACTIONS))
+    # Where this config was loaded from, so saving writes back to the same
+    # file. Without it `--config X` would load X and then overwrite the
+    # default path instead.
+    source_path: Path | None = None
 
     @property
     def uses_openrouter(self) -> bool:
@@ -138,6 +142,7 @@ def _parse_actions(raw: list, defaults: list[Action]) -> list[Action]:
 def load(path: Path | None = None) -> Config:
     cfg = Config()
     path = path or config_path()
+    cfg.source_path = path
     try:
         raw = tomllib.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -220,7 +225,7 @@ def dumps(cfg: Config) -> str:
 
 
 def save(cfg: Config, path: Path | None = None) -> Path:
-    path = path or config_path()
+    path = path or cfg.source_path or config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(dumps(cfg), encoding="utf-8")

@@ -98,6 +98,10 @@ quill doctor
 `SUPER + SHIFT + right-click` rather than plain `SUPER + right-click` because
 Omarchy binds the latter to drag-to-resize windows; this leaves that intact.
 
+The settings window opens with a **Shortcuts** list covering all of this. The
+Hyprland chords in it are read from `hyprctl binds` rather than hardcoded, so it
+stays truthful if you rebind them.
+
 In the menu: `1`–`9` run an edit directly, `↑`/`↓` and `⏎` also work, `Esc`
 closes. Pressing the trigger again while the menu is open dismisses it, the same
 way Omasnap behaves.
@@ -111,9 +115,11 @@ on the clipboard, **Retry** re-runs the same edit.
 Quill installs a small Omarchy shell plugin (`shell-plugin/`) that puts a
 fountain-pen nib in the bar, next to the dictation microphone:
 
-- **Click it** to open the edit menu for the current selection — same as the
-  keybinding.
-- **Right-click** for settings.
+- **Click it** for settings.
+- **Right-click it** to run an edit on the current selection.
+
+Editing is on right-click because `SUPER+I` already covers it from the keyboard,
+which leaves the plain click free for the thing that has no other shortcut.
 - **While a model request is running** the nib becomes a wand, so a slow edit is
   visible from the bar.
 

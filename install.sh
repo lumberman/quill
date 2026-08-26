@@ -147,8 +147,8 @@ if ((DO_KEYBIND)); then
 -- Quill: local-AI writing assistant. Select text in any app, then trigger to
 -- spellcheck or rewrite it in place. SUPER+SHIFT+right-click is used rather
 -- than SUPER+right-click so Omarchy's drag-to-resize binding stays intact.
-o.bind("SUPER + I", "Quill: AI writing menu", "$BIN_DIR/quill menu")
-o.bind("SUPER + SHIFT + mouse:273", "Quill: AI writing menu", "$BIN_DIR/quill menu")
+o.bind("SUPER + I", "Quill: Open the edit menu", "$BIN_DIR/quill menu")
+o.bind("SUPER + SHIFT + mouse:273", "Quill: Open the edit menu", "$BIN_DIR/quill menu")
 LUA
 )"
 

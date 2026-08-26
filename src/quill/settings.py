@@ -19,7 +19,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
 from . import config as config_mod  # noqa: E402
-from . import codex, credentials, ollama, openai_api, openrouter, provider  # noqa: E402
+from . import codex, credentials, hypr, ollama, openai_api, openrouter, provider  # noqa: E402
 from .actions import DEFAULT_ACTIONS, Action  # noqa: E402
 from .config import CODEX, OLLAMA, OPENAI, OPENROUTER, Config  # noqa: E402
 
@@ -54,6 +54,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.page = Adw.PreferencesPage()
         self.toasts.set_child(self.page)
 
+        self._build_shortcuts_group()
         self._build_provider_group()
         self._build_openai_group()
         self._build_codex_group()
@@ -64,6 +65,46 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._sync_account_row()
         self._sync_provider()
 
+
+
+    # -- shortcuts ---------------------------------------------------------
+    # In-app bindings are fixed, so they are listed literally; the Hyprland
+    # chords are read live, because the user may well have rebound them.
+    IN_APP_SHORTCUTS = [
+        ("Click the bar icon", "Settings (this window)"),
+        ("Right-click the bar icon", "Run an edit on the selection"),
+        ("1 – 9", "Run that edit straight from the menu"),
+        ("\u2191 \u2193  then  \u21b5", "Pick an edit and run it"),
+        ("\u21b5", "Replace the selection with the result"),
+        ("Esc", "Back to the menu, then close"),
+    ]
+
+    def _build_shortcuts_group(self) -> None:
+        group = Adw.PreferencesGroup(
+            title="Shortcuts",
+            description="The result panel is editable — fix a near-miss in place "
+                        "rather than re-running it.",
+        )
+        self.page.add(group)
+
+        rows: list[tuple[str, str]] = []
+        for chord, what in hypr.binds_matching("quill"):
+            rows.append((chord, what[0].upper() + what[1:] if what else "Open Quill"))
+        if not rows:
+            # Hyprland unreachable, or the keybindings were never installed.
+            rows.append(("Super + I", "AI writing menu (not currently bound)"))
+        rows += self.IN_APP_SHORTCUTS
+
+        for chord, what in rows:
+            row = Adw.ActionRow()
+            row.set_use_markup(False)
+            row.set_title(what)
+            label = Gtk.Label(label=chord)
+            label.set_valign(Gtk.Align.CENTER)
+            label.add_css_class("monospace")
+            label.add_css_class("dim-label")
+            row.add_suffix(label)
+            group.add(row)
 
     # -- provider ----------------------------------------------------------
     def _build_provider_group(self) -> None:

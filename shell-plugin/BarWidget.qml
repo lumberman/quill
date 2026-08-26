@@ -62,12 +62,13 @@ BarWidget {
     fontSize: Style.font.caption
     tooltipText: root.working
       ? (root.detail !== "" ? "Quill: " + root.detail + "\u2026" : "Quill: working\u2026")
-      : "Quill  \u00b7  right-click for settings"
-    // WidgetButton emits pressed(int button); right-click opens settings,
-    // matching how the other bar widgets separate action from configuration.
+      : "Quill  \u00b7  click for settings, right-click to edit selection"
+    // WidgetButton emits pressed(int button). Left-click opens settings and
+    // right-click runs the edit menu, which is the way round the keybinding
+    // makes sensible: SUPER+I already covers editing from the keyboard.
     onPressed: function(button) {
       if (!root.bar) return
-      root.bar.run(button === Qt.RightButton ? root.settingsCommand : root.command)
+      root.bar.run(button === Qt.RightButton ? root.command : root.settingsCommand)
     }
   }
 }

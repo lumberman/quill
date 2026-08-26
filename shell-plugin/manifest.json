@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Quill",
-    "description": "Local-AI writing assistant. Click to open the edit menu for the current selection; right-click for settings.",
+    "description": "Local-AI writing assistant. Click for settings; right-click to run an edit on the current selection.",
     "category": "Status",
     "aliases": [
       "quill",
@@ -35,14 +35,14 @@
         "type": "string",
         "label": "Command",
         "defaultValue": "quill menu",
-        "description": "Run when the icon is clicked."
+        "description": "Run when the icon is right-clicked."
       },
       {
         "key": "settingsCommand",
         "type": "string",
         "label": "Settings command",
         "defaultValue": "quill settings",
-        "description": "Run when the icon is right-clicked."
+        "description": "Run when the icon is left-clicked."
       },
       {
         "key": "alwaysShow",
