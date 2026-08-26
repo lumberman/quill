@@ -31,16 +31,27 @@ CSS = """
 .quill-hero {
   padding: 22px 12px 18px 12px;
 }
-.quill-chord {
-  font-size: 2.6em;
+/* Keycaps. The thicker bottom border is what reads as a physical key. */
+.quill-keycap {
+  background-color: alpha(currentColor, 0.10);
+  border: 1px solid alpha(currentColor, 0.30);
+  border-bottom: 3px solid alpha(currentColor, 0.42);
+  border-radius: 8px;
+  padding: 5px 12px;
   font-weight: 800;
-  letter-spacing: 0.5px;
 }
-.quill-chord-secondary {
-  font-size: 1.05em;
+.quill-keycap-lg {
+  font-size: 2.1em;
+  padding: 10px 22px;
+  border-radius: 12px;
+  border-bottom-width: 5px;
+}
+.quill-plus {
+  font-size: 1.3em;
   font-weight: 700;
-  opacity: 0.85;
+  opacity: 0.45;
 }
+.quill-plus-lg { font-size: 2.0em; }
 .quill-sample text {
   background: transparent;
 }
@@ -54,6 +65,10 @@ CSS = """
   background-color: alpha(@accent_bg_color, 0.10);
   border-radius: 9px;
   padding: 8px 10px;
+}
+.quill-was {
+  opacity: 0.55;
+  text-decoration: line-through;
 }
 .quill-step {
   font-weight: 700;
@@ -124,6 +139,29 @@ class SettingsWindow(Adw.ApplicationWindow):
         ("\u21b5 / Esc", "Replace the selection / close"),
     ]
 
+    @staticmethod
+    def _keycaps(chord: str, large: bool = False) -> Gtk.Box:
+        """Render "Super + Shift + I" as separate keys rather than a string."""
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                      spacing=10 if large else 6)
+        box.set_halign(Gtk.Align.CENTER)
+        parts = [p.strip() for p in chord.split("+") if p.strip()]
+        for index, part in enumerate(parts):
+            if index:
+                plus = Gtk.Label(label="+")
+                plus.add_css_class("quill-plus")
+                if large:
+                    plus.add_css_class("quill-plus-lg")
+                plus.set_valign(Gtk.Align.CENTER)
+                box.append(plus)
+            cap = Gtk.Label(label=part)
+            cap.add_css_class("quill-keycap")
+            if large:
+                cap.add_css_class("quill-keycap-lg")
+            cap.set_valign(Gtk.Align.CENTER)
+            box.append(cap)
+        return box
+
     def _build_hero(self) -> None:
         """The one thing to remember, at the size of the thing to remember."""
         group = Adw.PreferencesGroup()
@@ -137,10 +175,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         primary = next((c for c, w in binds if "menu" in w.lower()), "Super + I")
         secondary = next((c for c, w in binds if "menu" not in w.lower()), None)
 
-        chord = Gtk.Label(label=primary)
-        chord.add_css_class("quill-chord")
-        chord.add_css_class("accent")
-        box.append(chord)
+        box.append(self._keycaps(primary, large=True))
 
         caption = Gtk.Label(label="Select text in any app, then press this")
         caption.add_css_class("body")
@@ -148,11 +183,16 @@ class SettingsWindow(Adw.ApplicationWindow):
         box.append(caption)
 
         if secondary:
-            extra = Gtk.Label(label=f"{secondary}  ·  fix grammar in place, no popup")
-            extra.add_css_class("caption")
-            extra.add_css_class("dim-label")
-            extra.set_margin_top(8)
-            box.append(extra)
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            row.set_halign(Gtk.Align.CENTER)
+            row.set_margin_top(14)
+            row.append(self._keycaps(secondary))
+            note = Gtk.Label(label="fix grammar in place, no popup")
+            note.add_css_class("caption")
+            note.add_css_class("dim-label")
+            note.set_valign(Gtk.Align.CENTER)
+            row.append(note)
+            box.append(row)
 
         group.add(box)
 
@@ -160,131 +200,163 @@ class SettingsWindow(Adw.ApplicationWindow):
     SAMPLE = "i has recieved you're mesage yesterday and we was gonna reply."
 
     def _build_tutorial(self) -> None:
+        """A rehearsal of the real thing, not a simulation of it.
+
+        The steps are driven by what the user actually does: selecting the text
+        arms step two, and the buffer changing under the paste completes it.
+        Nothing here fakes the pipeline -- pressing the real chord runs the real
+        popup, which pastes back into this very field.
+        """
         group = Adw.PreferencesGroup(
             title="Try it here",
-            description="This runs the real model, exactly as the shortcut would.",
+            description="Three steps, using the real shortcut on real text.",
         )
         self.page.add(group)
 
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         box.set_margin_top(6)
         box.set_margin_bottom(6)
 
-        step1 = Gtk.Label(label="1  PRETEND YOU SELECTED THIS", xalign=0)
-        step1.add_css_class("quill-step")
-        box.append(step1)
+        # --- step 1 -------------------------------------------------------
+        self.step1 = self._step_header(1, "Select the text below")
+        box.append(self.step1)
 
         self.sample_view = Gtk.TextView()
         self.sample_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
         self.sample_view.add_css_class("quill-sample")
-        self.sample_view.get_buffer().set_text(self.SAMPLE)
+        buffer = self.sample_view.get_buffer()
+        buffer.set_text(self.SAMPLE)
+        self.tutorial_before = self.SAMPLE
+        buffer.connect("notify::has-selection", lambda *_: self._tutorial_selection())
+        buffer.connect("changed", lambda *_: self._tutorial_changed())
         frame = Gtk.Box()
         frame.add_css_class("quill-sample-frame")
-        frame.append(self.sample_view)
         self.sample_view.set_hexpand(True)
+        frame.append(self.sample_view)
         box.append(frame)
 
-        step2 = Gtk.Label(label="2  RUN AN EDIT", xalign=0)
-        step2.add_css_class("quill-step")
-        step2.set_margin_top(6)
-        box.append(step2)
+        # --- step 2 -------------------------------------------------------
+        self.step2 = self._step_header(2, "Press the shortcut")
+        self.step2.set_margin_top(10)
+        box.append(self.step2)
 
-        controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self.try_button = Gtk.Button()
-        self.try_button.set_child(Adw.ButtonContent(
-            icon_name="tools-check-spelling-symbolic",
-            label="Fix spelling & grammar"))
-        self.try_button.add_css_class("suggested-action")
-        self.try_button.connect("clicked", lambda *_: self._run_tutorial())
-        controls.append(self.try_button)
+        binds = hypr.binds_matching("quill")
+        chord = next((c for c, w in binds if "menu" in w.lower()), "Super + I")
+        press = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        press.set_margin_start(26)
+        press.append(self._keycaps(chord))
+        hint = Gtk.Label(label='then choose "Fix Spelling & Grammar"')
+        hint.add_css_class("caption")
+        hint.add_css_class("dim-label")
+        hint.set_valign(Gtk.Align.CENTER)
+        press.append(hint)
+        box.append(press)
 
-        self.try_spinner = Gtk.Spinner()
-        self.try_spinner.set_valign(Gtk.Align.CENTER)
-        controls.append(self.try_spinner)
+        self.reset_button = Gtk.Button(label="Reset the sample")
+        self.reset_button.add_css_class("flat")
+        self.reset_button.set_halign(Gtk.Align.START)
+        self.reset_button.set_margin_start(22)
+        self.reset_button.set_visible(False)
+        self.reset_button.connect("clicked", lambda *_: self._reset_tutorial())
+        box.append(self.reset_button)
 
-        self.try_status = Gtk.Label(label="", xalign=0)
-        self.try_status.add_css_class("caption")
-        self.try_status.add_css_class("dim-label")
-        self.try_status.set_valign(Gtk.Align.CENTER)
-        controls.append(self.try_status)
-        box.append(controls)
+        # --- step 3 -------------------------------------------------------
+        self.step3 = self._step_header(3, "Quill replaces what you selected")
+        self.step3.set_margin_top(10)
+        box.append(self.step3)
 
-        step3 = Gtk.Label(label="3  QUILL REPLACES YOUR SELECTION WITH THIS", xalign=0)
-        step3.add_css_class("quill-step")
-        step3.set_margin_top(6)
-        box.append(step3)
+        self.diff_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.diff_box.add_css_class("quill-result-frame")
+        self.diff_before = Gtk.Label(xalign=0, wrap=True)
+        self.diff_before.add_css_class("caption")
+        self.diff_before.add_css_class("quill-was")
+        self.diff_after = Gtk.Label(xalign=0, wrap=True)
+        self.diff_after.add_css_class("body")
+        self.diff_box.append(self.diff_before)
+        self.diff_box.append(self.diff_after)
+        box.append(self.diff_box)
 
-        self.try_result = Gtk.Label(label="—", xalign=0, wrap=True)
-        self.try_result.add_css_class("body")
-        result_frame = Gtk.Box()
-        result_frame.add_css_class("quill-result-frame")
-        result_frame.append(self.try_result)
-        self.try_result.set_hexpand(True)
-        box.append(result_frame)
+        self.diff_placeholder = Gtk.Label(
+            label="Nothing yet — do steps 1 and 2.", xalign=0)
+        self.diff_placeholder.add_css_class("caption")
+        self.diff_placeholder.add_css_class("dim-label")
+        box.append(self.diff_placeholder)
 
         group.add(box)
+        self._set_step_state(1, "todo")
+        self._set_step_state(2, "waiting")
+        self._set_step_state(3, "waiting")
+        self.diff_box.set_visible(False)
 
-    def _run_tutorial(self) -> None:
+    def _step_header(self, number: int, text: str) -> Gtk.Box:
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        icon = Gtk.Image.new_from_icon_name("radio-symbolic")
+        icon.set_valign(Gtk.Align.CENTER)
+        label = Gtk.Label(label=f"{number}  {text.upper()}", xalign=0)
+        label.add_css_class("quill-step")
+        row.append(icon)
+        row.append(label)
+        row._icon = icon
+        row._label = label
+        return row
+
+    def _set_step_state(self, number: int, state: str) -> None:
+        row = {1: self.step1, 2: self.step2, 3: self.step3}[number]
+        icon, label = row._icon, row._label
+        for css in ("accent", "success", "dim-label"):
+            icon.remove_css_class(css)
+            label.remove_css_class(css)
+        if state == "done":
+            icon.set_from_icon_name("emblem-ok-symbolic")
+            icon.add_css_class("success")
+            label.add_css_class("success")
+        elif state == "todo":
+            icon.set_from_icon_name("go-next-symbolic")
+            icon.add_css_class("accent")
+            label.add_css_class("accent")
+        else:
+            icon.set_from_icon_name("radio-symbolic")
+            icon.add_css_class("dim-label")
+            label.add_css_class("dim-label")
+
+    def _tutorial_selection(self) -> None:
+        """Selecting the sample is what arms step two."""
         buffer = self.sample_view.get_buffer()
-        text = buffer.get_text(*buffer.get_bounds(), False).strip()
-        if not text:
-            self._toast("Type something to edit first")
+        if not buffer.get_has_selection():
             return
-
-        cfg = self._collect()
-        usable, reason = provider.ready(cfg)
-        if not usable:
-            self.try_status.set_label(reason)
+        start, end = buffer.get_selection_bounds()
+        selected = buffer.get_text(start, end, False)
+        if len(selected.strip()) < 4:
             return
+        self.tutorial_before = selected
+        self._set_step_state(1, "done")
+        self._set_step_state(2, "todo")
+        self.reset_button.set_visible(True)
 
-        self.try_button.set_sensitive(False)
-        self.try_spinner.start()
-        self.try_status.set_label(f"{provider.label(cfg)}…")
-        self.try_result.set_label("—")
+    def _tutorial_changed(self) -> None:
+        """The buffer changing under the paste is what completes step three."""
+        buffer = self.sample_view.get_buffer()
+        current = buffer.get_text(*buffer.get_bounds(), False)
+        if current.strip() == self.SAMPLE.strip() or not current.strip():
+            return
+        if not self.tutorial_before or self.tutorial_before.strip() == current.strip():
+            return
+        self._set_step_state(2, "done")
+        self._set_step_state(3, "done")
+        self.diff_placeholder.set_visible(False)
+        self.diff_box.set_visible(True)
+        self.diff_before.set_label(f"was:  {self.tutorial_before.strip()}")
+        self.diff_after.set_label(f"now:  {current.strip()}")
 
-        # A cold model can take 20s+ to load. Saying so beats a mute spinner.
-        self._try_running = True
-
-        def explain_the_wait():
-            if getattr(self, "_try_running", False):
-                self.try_status.set_label(
-                    "Loading the model into memory — the first edit after a "
-                    "restart is slow, later ones are not.")
-            return False
-
-        GLib.timeout_add_seconds(3, explain_the_wait)
-
-        action = cfg.action("fix")
-        messages = build_messages(action, text)
-
-        def worker():
-            start = time.monotonic()
-            try:
-                chunks = list(provider.stream_chat(cfg, messages, action.temperature))
-                out = sanitize.clean_output("".join(chunks), text)
-                GLib.idle_add(self._tutorial_done, out, time.monotonic() - start, None)
-            except provider.ProviderError as exc:
-                GLib.idle_add(self._tutorial_done, "", 0.0, str(exc))
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    @staticmethod
-    def _format_duration(seconds: float) -> str:
-        return f"{seconds:.1f} s" if seconds >= 1 else f"{seconds * 1000:.0f} ms"
-
-    def _tutorial_done(self, out: str, seconds: float, error: str | None) -> bool:
-        self._try_running = False
-        self.try_spinner.stop()
-        self.try_button.set_sensitive(True)
-        if error:
-            self.try_status.set_label(error)
-            return False
-        self.try_result.set_label(out or "(the model returned nothing)")
-        took = self._format_duration(seconds)
-        self.try_status.set_label(
-            f"took {took} — that first one included loading the model"
-            if seconds >= 3 else f"took {took}")
-        return False
+    def _reset_tutorial(self) -> None:
+        self.sample_view.get_buffer().set_text(self.SAMPLE)
+        self.tutorial_before = self.SAMPLE
+        self._set_step_state(1, "todo")
+        self._set_step_state(2, "waiting")
+        self._set_step_state(3, "waiting")
+        self.diff_box.set_visible(False)
+        self.diff_placeholder.set_visible(True)
+        self.reset_button.set_visible(False)
 
     def _build_shortcuts_group(self) -> None:
         """Reference, not a setting.

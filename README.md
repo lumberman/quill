@@ -316,8 +316,15 @@ default alone.
 quill settings
 ```
 
-…or right-click the bar icon. A libadwaita window covering everything in the
-config file:
+…or click the bar icon. The window opens with the shortcut set in keycaps and a
+three-step tutorial that uses the *real* shortcut on real text: select the
+sample, press the chord, and Quill replaces it in place and shows you what
+changed. The steps are driven by what you actually do — selecting the sample
+arms step two, and the buffer changing under the paste completes it — so it is a
+rehearsal rather than a simulation, and it doubles as a check that your chosen
+model works.
+
+Below that, everything in the config file:
 
 - **Model** — picked from a list of what you actually have pulled, with a live
   "Ollama is running · <model> is installed" check and a refresh button
