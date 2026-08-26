@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import re
 import threading
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
 
+from . import openai_compat
 from .config import Config
 
 
@@ -56,10 +58,17 @@ def _stream_response(
     cancel: threading.Event | None,
 ) -> Iterator[str]:
     """Yield content deltas from one NDJSON streaming response."""
+    deadline = time.monotonic() + cfg.request_timeout
     with urllib.request.urlopen(req, timeout=cfg.request_timeout) as resp:
         for raw in resp:
             if cancel is not None and cancel.is_set():
                 return
+            # Per-read timeouts do not catch a model that never stops.
+            if time.monotonic() > deadline:
+                raise OllamaError(
+                    f"The model was still streaming after "
+                    f"{cfg.request_timeout:.0f}s; giving up."
+                )
             line = raw.decode("utf-8", errors="replace").strip()
             if not line:
                 continue
@@ -96,6 +105,8 @@ def stream_chat(
         "options": {
             "temperature": temperature,
             "num_ctx": cfg.num_ctx,
+            # Ollama defaults num_predict to unlimited.
+            "num_predict": openai_compat.output_cap(messages),
         },
     }
     # Reasoning is actively harmful here: a rewrite needs no deliberation, and a

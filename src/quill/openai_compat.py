@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
@@ -15,6 +16,20 @@ from collections.abc import Iterator
 
 class CompatError(RuntimeError):
     pass
+
+
+def output_cap(messages: list[dict], floor: int = 256, multiple: int = 3,
+               ceiling: int = 4096) -> int:
+    """Token budget for an edit, derived from the text being edited.
+
+    Editing returns something about as long as it was given, so a multiple of
+    the input is a real bound. Without one, a model that never emits a stop
+    token streams until something else gives out -- a 135M model did exactly
+    that here and pinned the machine.
+    """
+    text = "".join(m.get("content", "") for m in messages if m.get("role") != "system")
+    approx_tokens = len(text) // 3          # deliberately conservative
+    return max(floor, min(ceiling, approx_tokens * multiple))
 
 
 def build_request(base_url: str, path: str, payload: dict | None,
@@ -49,11 +64,19 @@ def stream_completion(request: urllib.request.Request, timeout: float,
                       cancel: threading.Event | None,
                       service: str = "The server") -> Iterator[str]:
     """Yield content deltas from a streaming chat completion."""
+    # urllib's timeout is per-read, so a model that keeps emitting tokens
+    # forever never trips it. Track total elapsed time as well.
+    deadline = time.monotonic() + timeout
     try:
         with urllib.request.urlopen(request, timeout=timeout) as resp:
             for raw in resp:
                 if cancel is not None and cancel.is_set():
                     return
+                if time.monotonic() > deadline:
+                    raise CompatError(
+                        f"{service} was still streaming after {timeout:.0f}s; "
+                        f"giving up."
+                    )
                 line = raw.decode("utf-8", errors="replace").strip()
                 # Comment frames are keep-alives (OpenRouter sends
                 # ": OPENROUTER PROCESSING"); blank lines separate SSE events.

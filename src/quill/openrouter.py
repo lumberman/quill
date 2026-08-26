@@ -135,6 +135,7 @@ def stream_chat(cfg, messages: list[dict], temperature: float = 0.2,
         "messages": messages,
         "stream": True,
         "temperature": temperature,
+        "max_tokens": openai_compat.output_cap(messages),
         # Same rationale as Ollama's think=false: an edit is a transformation,
         # and reasoning tokens are latency we pay for and then discard.
         "reasoning": {"exclude": True},

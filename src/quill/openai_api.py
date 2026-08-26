@@ -83,6 +83,7 @@ def stream_chat(cfg, messages: list[dict], temperature: float = 0.2,
         "messages": messages,
         "stream": True,
         "temperature": temperature,
+        "max_tokens": openai_compat.output_cap(messages),
     }
     request = openai_compat.build_request(
         cfg.openai_base_url, "/chat/completions", payload, api_key)
