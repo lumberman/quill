@@ -7,6 +7,7 @@ the two would mean one class juggling two very different lifecycles.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import replace
 
 import gi
@@ -15,12 +16,12 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gio, Gtk  # noqa: E402
+from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
 from . import config as config_mod  # noqa: E402
-from . import ollama  # noqa: E402
+from . import credentials, ollama, openrouter, provider  # noqa: E402
 from .actions import DEFAULT_ACTIONS, Action  # noqa: E402
-from .config import Config  # noqa: E402
+from .config import OLLAMA, OPENROUTER, Config  # noqa: E402
 
 KEEP_ALIVE_HINT = ("How long the model stays in VRAM. Longer keeps repeat "
                    "edits instant; 0 frees the GPU immediately.")
@@ -53,20 +54,33 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.page = Adw.PreferencesPage()
         self.toasts.set_child(self.page)
 
+        self._build_provider_group()
+        self._build_openrouter_group()
         self._build_model_group()
         self._build_behaviour_group()
         self._build_actions_group()
-        self._refresh_status()
+        self._sync_account_row()
+        self._sync_provider()
 
-    # -- model -------------------------------------------------------------
-    def _build_model_group(self) -> None:
-        group = Adw.PreferencesGroup(title="Model")
+
+    # -- provider ----------------------------------------------------------
+    def _build_provider_group(self) -> None:
+        group = Adw.PreferencesGroup(title="Where edits run")
         self.page.add(group)
 
-        self.model_row = Adw.ComboRow(title="Model")
-        self.model_row.set_subtitle("Anything you have pulled in Ollama")
-        group.add(self.model_row)
-        self._reload_model_list()
+        self.provider_row = Adw.ComboRow(title="Provider")
+        self.provider_row.set_model(Gtk.StringList.new([
+            "On this machine (Ollama)",
+            "OpenRouter (cloud)",
+        ]))
+        self.provider_row.set_selected(1 if self.cfg.uses_openrouter else 0)
+        self.provider_row.connect("notify::selected", lambda *_: self._sync_provider())
+        group.add(self.provider_row)
+
+        self.privacy_row = Adw.ActionRow()
+        self.privacy_row.set_use_markup(False)
+        self.privacy_row.set_title("Privacy")
+        group.add(self.privacy_row)
 
         self.status_row = Adw.ActionRow()
         self.status_row.set_use_markup(False)
@@ -74,10 +88,153 @@ class SettingsWindow(Adw.ApplicationWindow):
         refresh = Gtk.Button(icon_name="view-refresh-symbolic")
         refresh.set_valign(Gtk.Align.CENTER)
         refresh.add_css_class("flat")
-        refresh.set_tooltip_text("Re-check Ollama")
+        refresh.set_tooltip_text("Re-check the backend")
         refresh.connect("clicked", lambda *_: self._refresh_status(reload_models=True))
         self.status_row.add_suffix(refresh)
         group.add(self.status_row)
+
+
+    def _provider_value(self) -> str:
+        return OPENROUTER if self.provider_row.get_selected() == 1 else OLLAMA
+
+    def _sync_provider(self) -> None:
+        """Grey out the group that is not in use, rather than hiding it."""
+        using_openrouter = self._provider_value() == OPENROUTER
+        self.openrouter_group.set_sensitive(using_openrouter)
+        self.model_group.set_sensitive(not using_openrouter)
+        self.privacy_row.set_subtitle(
+            "Selected text is sent to OpenRouter and to whichever provider "
+            "serves the model. Free models are often trained on."
+            if using_openrouter else
+            "Nothing leaves this machine."
+        )
+        self._refresh_status()
+
+    # -- openrouter --------------------------------------------------------
+    def _build_openrouter_group(self) -> None:
+        self.openrouter_group = Adw.PreferencesGroup(
+            title="OpenRouter",
+            description="Sign in with your OpenRouter account, or paste an API key.",
+        )
+        self.page.add(self.openrouter_group)
+
+        self.account_row = Adw.ActionRow()
+        self.account_row.set_use_markup(False)
+        self.account_row.set_title("Account")
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        buttons.set_valign(Gtk.Align.CENTER)
+        self.signin_button = Gtk.Button(label="Sign in")
+        self.signin_button.add_css_class("suggested-action")
+        self.signin_button.connect("clicked", lambda *_: self._sign_in())
+        self.signout_button = Gtk.Button(label="Disconnect")
+        self.signout_button.connect("clicked", lambda *_: self._sign_out())
+        buttons.append(self.signout_button)
+        buttons.append(self.signin_button)
+        self.account_row.add_suffix(buttons)
+        self.openrouter_group.add(self.account_row)
+
+        self.key_row = Adw.PasswordEntryRow(title="…or paste an API key")
+        apply_key = Gtk.Button(label="Save key")
+        apply_key.set_valign(Gtk.Align.CENTER)
+        apply_key.connect("clicked", lambda *_: self._save_pasted_key())
+        self.key_row.add_suffix(apply_key)
+        self.openrouter_group.add(self.key_row)
+
+        self.free_row = Adw.SwitchRow(
+            title="Free models only",
+            subtitle="Free models are rate-limited and may be slower.",
+        )
+        self.free_row.set_active(self.cfg.openrouter_free_only)
+        self.free_row.connect("notify::active", lambda *_: self._reload_openrouter_models())
+        self.openrouter_group.add(self.free_row)
+
+        self.or_model_row = Adw.ComboRow(title="Model")
+        self.openrouter_group.add(self.or_model_row)
+        self._reload_openrouter_models()
+
+    def _reload_openrouter_models(self) -> None:
+        try:
+            found = openrouter.models(free_only=self.free_row.get_active())
+            ids = [m["id"] for m in found]
+        except openrouter.OpenRouterError:
+            ids = []
+        if self.cfg.openrouter_model not in ids:
+            ids.insert(0, self.cfg.openrouter_model)
+        self.or_model_ids = ids
+        self.or_model_row.set_model(Gtk.StringList.new(ids))
+        try:
+            self.or_model_row.set_selected(ids.index(self.cfg.openrouter_model))
+        except ValueError:
+            self.or_model_row.set_selected(0)
+        self.or_model_row.set_subtitle(f"{len(ids)} available")
+
+    def _selected_openrouter_model(self) -> str:
+        index = self.or_model_row.get_selected()
+        if 0 <= index < len(self.or_model_ids):
+            return self.or_model_ids[index]
+        return self.cfg.openrouter_model
+
+    def _sync_account_row(self) -> None:
+        source = openrouter.key_source()
+        connected = bool(source)
+        self.account_row.set_subtitle(
+            f"Connected · key stored in {source}" if connected
+            else "Not connected"
+        )
+        self.signin_button.set_label("Sign in again" if connected else "Sign in")
+        self.signout_button.set_sensitive(connected)
+
+    def _sign_in(self) -> None:
+        self.signin_button.set_sensitive(False)
+        self._toast("Opening your browser…")
+
+        def worker():
+            try:
+                openrouter.login()
+                GLib.idle_add(self._sign_in_done, None)
+            except openrouter.OpenRouterError as exc:
+                GLib.idle_add(self._sign_in_done, str(exc))
+
+        # The loopback server blocks until the redirect arrives, so it cannot
+        # run on the main loop without freezing the window.
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _sign_in_done(self, error: str | None) -> bool:
+        self.signin_button.set_sensitive(True)
+        self._toast(error or "Connected to OpenRouter")
+        self._sync_account_row()
+        self._reload_openrouter_models()
+        self._refresh_status()
+        return False
+
+    def _sign_out(self) -> None:
+        openrouter.forget_key()
+        self._sync_account_row()
+        self._refresh_status()
+        self._toast("Disconnected. Revoke the key at openrouter.ai/settings/keys")
+
+    def _save_pasted_key(self) -> None:
+        value = self.key_row.get_text().strip()
+        if not value:
+            self._toast("Paste a key first")
+            return
+        where = openrouter.store_key(value)
+        self.key_row.set_text("")
+        self._toast(f"Key saved to {where}")
+        self._sync_account_row()
+        self._reload_openrouter_models()
+        self._refresh_status()
+
+    # -- model -------------------------------------------------------------
+    def _build_model_group(self) -> None:
+        group = Adw.PreferencesGroup(title="Local model (Ollama)")
+        self.model_group = group
+        self.page.add(group)
+
+        self.model_row = Adw.ComboRow(title="Model")
+        self.model_row.set_subtitle("Anything you have pulled in Ollama")
+        group.add(self.model_row)
+        self._reload_model_list()
 
         self.host_row = Adw.EntryRow(title="Ollama host")
         self.host_row.set_text(self.cfg.host)
@@ -124,20 +281,17 @@ class SettingsWindow(Adw.ApplicationWindow):
             self.model_row.set_selected(0)
 
     def _refresh_status(self, reload_models: bool = False) -> None:
-        probe = replace(self.cfg, host=self.host_row.get_text().strip() or self.cfg.host)
-        if not ollama.is_up(probe):
-            self.status_row.set_subtitle("Ollama is not reachable — try: systemctl start ollama")
-            self.status_row.add_css_class("error")
-            return
-        self.status_row.remove_css_class("error")
+        if not hasattr(self, "status_row"):
+            return  # called from _sync_provider before the model group exists
         if reload_models:
             self._reload_model_list()
-        selected = self._selected_model()
-        installed = ollama.has_model(replace(probe, model=selected), selected)
-        self.status_row.set_subtitle(
-            f"Ollama is running · {selected} is installed" if installed
-            else f"Ollama is running · {selected} is NOT installed (ollama pull {selected})"
-        )
+        probe = self._collect()
+        usable, reason = provider.ready(probe)
+        self.status_row.set_subtitle(reason)
+        if usable:
+            self.status_row.remove_css_class("error")
+        else:
+            self.status_row.add_css_class("error")
 
     def _selected_model(self) -> str:
         index = self.model_row.get_selected()
@@ -327,7 +481,10 @@ class SettingsWindow(Adw.ApplicationWindow):
 
     def _collect(self) -> Config:
         cfg = replace(self.cfg)
+        cfg.provider = self._provider_value()
         cfg.model = self._selected_model()
+        cfg.openrouter_model = self._selected_openrouter_model()
+        cfg.openrouter_free_only = self.free_row.get_active()
         cfg.host = self.host_row.get_text().strip() or self.cfg.host
         index = self.keep_alive_row.get_selected()
         cfg.keep_alive = (self.keep_alive_values[index]

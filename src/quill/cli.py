@@ -10,7 +10,7 @@ import sys
 import threading
 from pathlib import Path
 
-from . import clipboard, hypr, ollama, state
+from . import clipboard, hypr, ollama, openrouter, provider, sanitize, state
 from .actions import build_messages
 from .config import Config, config_path, load
 
@@ -47,22 +47,10 @@ def _dismiss_existing() -> bool:
 
 
 def _preflight(cfg: Config) -> bool:
-    if not ollama.is_up(cfg):
-        hypr.notify(
-            "Quill: Ollama is not running",
-            "Start it with:  systemctl --user start ollama\n"
-            "or system-wide:  sudo systemctl start ollama",
-            urgency="critical",
-        )
-        return False
-    if not ollama.has_model(cfg):
-        hypr.notify(
-            f"Quill: model '{cfg.model}' is not installed",
-            f"Install it with:  ollama pull {cfg.model}",
-            urgency="critical",
-        )
-        return False
-    return True
+    usable, reason = provider.ready(cfg)
+    if not usable:
+        hypr.notify("Quill is not ready", reason, urgency="critical")
+    return usable
 
 
 def cmd_menu(args, cfg: Config) -> int:
@@ -107,12 +95,12 @@ def cmd_run(args, cfg: Config) -> int:
     messages = build_messages(action, text, args.instruction or "")
     try:
         with state.working(action.label):
-            chunks = list(ollama.stream_chat(cfg, messages, action.temperature))
-    except ollama.OllamaError as exc:
+            chunks = list(provider.stream_chat(cfg, messages, action.temperature))
+    except provider.ProviderError as exc:
         hypr.notify("Quill failed", str(exc), urgency="critical")
         return 1
 
-    result = ollama.clean_output("".join(chunks), text)
+    result = sanitize.clean_output("".join(chunks), text)
     if not result.strip():
         hypr.notify("Quill: empty result")
         return 1
@@ -134,19 +122,65 @@ def cmd_filter(args, cfg: Config) -> int:
     if action is None:
         print(text, end="")
         return 2
-    if not ollama.is_up(cfg) or not ollama.has_model(cfg):
+    if not provider.ready(cfg)[0]:
         # Never swallow the caller's text just because the model is unavailable.
         print(text, end="")
         return 1
     messages = build_messages(action, text, args.instruction or "")
     try:
         with state.working(action.label):
-            chunks = list(ollama.stream_chat(cfg, messages, action.temperature))
-    except ollama.OllamaError:
+            chunks = list(provider.stream_chat(cfg, messages, action.temperature))
+    except provider.ProviderError:
         print(text, end="")
         return 1
-    result = ollama.clean_output("".join(chunks), text)
+    result = sanitize.clean_output("".join(chunks), text)
     print(result or text, end="")
+    return 0
+
+
+def cmd_login(args, cfg: Config) -> int:
+    """Browser sign-in to OpenRouter (OAuth PKCE)."""
+    if openrouter.has_key() and not args.force:
+        print(f"Already connected (key from {openrouter.key_source()}).")
+        print("Re-run with --force to replace it.")
+        return 0
+    print("Opening your browser to sign in to OpenRouter...")
+    try:
+        api_key = openrouter.login(
+            on_url=lambda url: print(f"\nIf it did not open:\n  {url}\n"))
+    except openrouter.OpenRouterError as exc:
+        print(f"Sign-in failed: {exc}", file=sys.stderr)
+        return 1
+    from . import credentials
+    print(f"Connected. Key {credentials.redact(api_key)} saved to "
+          f"{openrouter.key_source()}.")
+    return 0
+
+
+def cmd_logout(args, cfg: Config) -> int:
+    if not openrouter.has_key():
+        print("Not connected.")
+        return 0
+    openrouter.forget_key()
+    print("Disconnected. The key was removed from local storage.")
+    print("Revoke it for good at https://openrouter.ai/settings/keys")
+    return 0
+
+
+def cmd_models(args, cfg: Config) -> int:
+    """List what the selected provider can run."""
+    if cfg.uses_openrouter:
+        try:
+            found = openrouter.models(free_only=not args.all)
+        except openrouter.OpenRouterError as exc:
+            print(f"{exc}", file=sys.stderr)
+            return 1
+        for model in found:
+            marker = "free" if model["free"] else "paid"
+            print(f"{model['id']:<52} {marker:>4}  ctx={model['context_length']}")
+        return 0
+    for name in ollama.installed_models(cfg):
+        print(name)
     return 0
 
 
@@ -160,26 +194,30 @@ def cmd_doctor(args, cfg: Config) -> int:
     ok = True
     print(f"config       {config_path()}"
           f"{'' if config_path().exists() else '  (not created, using defaults)'}")
-    print(f"host         {cfg.host}")
-    print(f"model        {cfg.model}")
+    print(f"provider     {cfg.provider}")
+    if cfg.uses_openrouter:
+        print(f"model        {cfg.openrouter_model}")
+        print(f"api key      {openrouter.key_source() or 'NOT CONNECTED'}")
+    else:
+        print(f"host         {cfg.host}")
+        print(f"model        {cfg.model}")
 
     import shutil
-    for tool in ("hyprctl", "wl-copy", "wl-paste", "notify-send", "ollama"):
+    optional = {"ollama", "secret-tool"}
+    for tool in ("hyprctl", "wl-copy", "wl-paste", "notify-send", "ollama",
+                 "secret-tool"):
         found = shutil.which(tool)
         print(f"{tool:<12} {found or 'MISSING'}")
-        if not found and tool != "ollama":
+        if not found and tool not in optional:
             ok = False
 
-    up = ollama.is_up(cfg)
-    print(f"ollama api   {'reachable' if up else 'NOT reachable'}")
-    ok = ok and up
+    usable, reason = provider.ready(cfg)
+    print(f"backend      {reason}")
+    ok = ok and usable
 
-    if up:
+    if not cfg.uses_openrouter and ollama.is_up(cfg):
         names = ollama.installed_models(cfg)
-        present = ollama.has_model(cfg)
-        print(f"model ready  {'yes' if present else 'NO — run: ollama pull ' + cfg.model}")
         print(f"installed    {', '.join(names) if names else '(none)'}")
-        ok = ok and present
 
     win = hypr.active_window()
     print(f"hyprland     {'ok' if win is not None or hypr.monitors() else 'NOT responding'}")
@@ -213,6 +251,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_settings = sub.add_parser("settings", help="open the settings window")
     p_settings.set_defaults(func=cmd_settings)
+
+    p_login = sub.add_parser("login", help="sign in to OpenRouter in a browser")
+    p_login.add_argument("--force", action="store_true",
+                         help="replace an existing key")
+    p_login.set_defaults(func=cmd_login)
+
+    p_logout = sub.add_parser("logout", help="forget the stored OpenRouter key")
+    p_logout.set_defaults(func=cmd_logout)
+
+    p_models = sub.add_parser("models", help="list available models")
+    p_models.add_argument("--all", action="store_true",
+                          help="include paid OpenRouter models")
+    p_models.set_defaults(func=cmd_models)
 
     p_doctor = sub.add_parser("doctor", help="check the install")
     p_doctor.set_defaults(func=cmd_doctor)

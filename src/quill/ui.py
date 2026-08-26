@@ -15,7 +15,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
-from . import clipboard, hypr, ollama, state  # noqa: E402
+from . import clipboard, hypr, provider, sanitize, state  # noqa: E402
 from .actions import Action, build_messages  # noqa: E402
 from .config import Config  # noqa: E402
 
@@ -160,7 +160,8 @@ class QuillWindow(Adw.ApplicationWindow):
         self.snippet_label.set_max_width_chars(40)
         words = len(self.source_text.split())
         self.meta_label = Gtk.Label(
-            label=f"{words} word{'s' if words != 1 else ''} · {self.cfg.model}", xalign=0
+            label=f"{words} word{'s' if words != 1 else ''} · {provider.label(self.cfg)}",
+            xalign=0,
         )
         self.meta_label.add_css_class("quill-meta")
         header.append(self.snippet_label)
@@ -359,11 +360,11 @@ class QuillWindow(Adw.ApplicationWindow):
 
     def _stream_worker(self, messages, temperature, cancel) -> None:
         try:
-            for delta in ollama.stream_chat(self.cfg, messages, temperature, cancel):
+            for delta in provider.stream_chat(self.cfg, messages, temperature, cancel):
                 if cancel.is_set():
                     return
                 GLib.idle_add(self._append_delta, delta)
-        except ollama.OllamaError as exc:
+        except provider.ProviderError as exc:
             GLib.idle_add(self._on_stream_error, str(exc))
             return
         if not cancel.is_set():
@@ -372,7 +373,7 @@ class QuillWindow(Adw.ApplicationWindow):
     def _append_delta(self, delta: str) -> bool:
         self._result_chars.append(delta)
         # Sanitise as we go so reasoning blocks never flash on screen.
-        shown = ollama.clean_output("".join(self._result_chars))
+        shown = sanitize.clean_output("".join(self._result_chars))
         self.result_buffer.set_text(shown)
         end = self.result_buffer.get_end_iter()
         self.result_view.scroll_to_iter(end, 0.0, False, 0.0, 0.0)
@@ -381,7 +382,7 @@ class QuillWindow(Adw.ApplicationWindow):
     def _on_stream_done(self) -> bool:
         state.write(state.IDLE)
         self.spinner.stop()
-        final = ollama.clean_output("".join(self._result_chars), self.source_text)
+        final = sanitize.clean_output("".join(self._result_chars), self.source_text)
         self.result_buffer.set_text(final)
         self.status_label.set_label("⏎ to replace")
         self.replace_button.set_sensitive(True)
@@ -460,12 +461,14 @@ def run(cfg: Config, text: str, win: dict | None, saved_clipboard: str | None) -
                           flags=Gio.ApplicationFlags.NON_UNIQUE)
 
     def on_activate(application):
-        provider = Gtk.CssProvider()
-        provider.load_from_data(CSS.encode("utf-8"))
+        # Named css_provider, not provider: the module of that name is
+        # imported at the top and shadowing it here is a trap.
+        css_provider = Gtk.CssProvider()
+        css_provider.load_from_data(CSS.encode("utf-8"))
         display = Gdk.Display.get_default()
         if display is not None:
             Gtk.StyleContext.add_provider_for_display(
-                display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+                display, css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
             )
         window = QuillWindow(application, cfg, text, win, saved_clipboard)
         window.present()

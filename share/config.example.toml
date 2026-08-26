@@ -1,6 +1,17 @@
 # Quill configuration — copy to ~/.config/quill/config.toml
 # Every key is optional; anything omitted falls back to the built-in default.
 
+# Where edits run: "ollama" (this machine) or "openrouter" (cloud).
+# OpenRouter sends the selected text off the machine. Connect with `quill login`.
+provider = "ollama"
+
+# --- OpenRouter ------------------------------------------------------------
+# Only used when provider = "openrouter". The API key is NOT stored here; it
+# lives in the login keyring, or ~/.config/quill/credentials.json at 0600.
+openrouter_model = "z-ai/glm-5.2:free"
+openrouter_free_only = true
+
+# --- Ollama ----------------------------------------------------------------
 # Any model you have pulled in Ollama. See `ollama list`.
 model = "gemma4:12b-it-qat"
 

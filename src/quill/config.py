@@ -11,6 +11,11 @@ from .actions import DEFAULT_ACTIONS, Action
 
 DEFAULT_MODEL = "gemma4:12b-it-qat"
 DEFAULT_HOST = "http://127.0.0.1:11434"
+DEFAULT_OPENROUTER_MODEL = "z-ai/glm-5.2:free"
+
+OLLAMA = "ollama"
+OPENROUTER = "openrouter"
+PROVIDERS = (OLLAMA, OPENROUTER)
 
 
 def config_path() -> Path:
@@ -20,6 +25,9 @@ def config_path() -> Path:
 
 @dataclass
 class Config:
+    # Which backend runs the edit. "ollama" keeps everything on this machine;
+    # "openrouter" sends the selected text to a third party.
+    provider: str = OLLAMA
     model: str = DEFAULT_MODEL
     host: str = DEFAULT_HOST
     # Holding the model resident is what makes the second invocation feel instant.
@@ -32,7 +40,20 @@ class Config:
     restore_clipboard: bool = True
     # Replace immediately instead of showing the result for review first.
     auto_replace: bool = False
+    # Kept separate from `model` so switching providers back and forth does
+    # not lose the other one's choice.
+    openrouter_model: str = DEFAULT_OPENROUTER_MODEL
+    openrouter_free_only: bool = True
     actions: list[Action] = field(default_factory=lambda: list(DEFAULT_ACTIONS))
+
+    @property
+    def uses_openrouter(self) -> bool:
+        return self.provider == OPENROUTER
+
+    @property
+    def active_model(self) -> str:
+        """The model actually in play, whichever backend is selected."""
+        return self.openrouter_model if self.uses_openrouter else self.model
 
     @property
     def chat_url(self) -> str:
@@ -92,7 +113,12 @@ def load(path: Path | None = None) -> Config:
         # A broken config should degrade to defaults, not break the hotkey.
         return cfg
 
+    provider = str(raw.get("provider", cfg.provider)).strip().lower()
+    cfg.provider = provider if provider in PROVIDERS else cfg.provider
     cfg.model = str(raw.get("model", cfg.model))
+    cfg.openrouter_model = str(raw.get("openrouter_model", cfg.openrouter_model))
+    cfg.openrouter_free_only = bool(
+        raw.get("openrouter_free_only", cfg.openrouter_free_only))
     cfg.host = str(raw.get("host", cfg.host))
     cfg.keep_alive = str(raw.get("keep_alive", cfg.keep_alive))
     cfg.num_ctx = int(raw.get("num_ctx", cfg.num_ctx))
@@ -133,8 +159,9 @@ def dumps(cfg: Config) -> str:
         "# Written by `quill settings` -- hand-edits survive, comments do not.",
         "",
     ]
-    for key in ("model", "host", "keep_alive", "num_ctx", "request_timeout",
-                "restore_clipboard", "auto_replace"):
+    for key in ("provider", "model", "host", "keep_alive", "num_ctx",
+                "request_timeout", "restore_clipboard", "auto_replace",
+                "openrouter_model", "openrouter_free_only"):
         lines.append(f"{key} = {_toml_value(getattr(cfg, key))}")
     if cfg.think is not None:
         lines.append(f"think = {_toml_value(cfg.think)}")

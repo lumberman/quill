@@ -4,8 +4,11 @@ A local-AI writing assistant for [Omarchy](https://omarchy.org). Select text in
 any application, press **SUPER+I** (or **SUPER+SHIFT+right-click**), pick an
 edit, and Quill replaces the selection in place.
 
-Everything runs on your own machine through [Ollama](https://ollama.com). No
-text ever leaves the computer, and it works with no network connection.
+By default everything runs on your own machine through
+[Ollama](https://ollama.com): no text leaves the computer and it works offline.
+You can also point it at [OpenRouter](https://openrouter.ai) to use hosted
+models, including its free tier — that does send the selected text off the
+machine, and Quill says so in the settings window.
 
 ```
 Fix Spelling & Grammar   Rewrite for Clarity   Make It Shorter
@@ -71,6 +74,16 @@ quill doctor
 
 ## Keybindings
 
+| Command | Action |
+|---|---|
+| `quill menu` | The popup (what the keybinding runs) |
+| `quill run <id>` | Apply one edit directly |
+| `quill filter <id>` | stdin → stdout |
+| `quill settings` | Settings window |
+| `quill login` / `logout` | OpenRouter sign-in |
+| `quill models` | List available models |
+| `quill doctor` | Check the install |
+
 | Chord | Action |
 |---|---|
 | `SUPER + I` | Open the Quill menu at the cursor |
@@ -106,6 +119,54 @@ no torn read.
 
 Remove it by deleting the symlink and the `quill.writer` entry from
 `~/.config/omarchy/shell.json`, then running `omarchy-restart-shell`.
+
+## Using OpenRouter instead
+
+Quill can run edits through OpenRouter rather than locally. Useful when you want
+a bigger model than the GPU can hold, or on a machine with no GPU at all.
+
+**Understand the trade first.** With OpenRouter selected, the text you highlight
+is sent to OpenRouter and on to whichever provider serves that model. Free models
+in particular are commonly trained on. Do not point it at anything confidential;
+keep the local provider for that. Quill shows this in the settings window rather
+than burying it here.
+
+Connect by signing in with your OpenRouter account:
+
+```bash
+quill login
+```
+
+That opens your browser, you approve, and Quill receives a key scoped to your own
+account. It is OAuth 2.0 with PKCE, so no client secret is involved and the
+authorization code is useless to anyone who intercepts it. Or paste an existing
+key into the settings window instead — same result.
+
+```bash
+quill models          # free text models available right now
+quill models --all    # include paid ones
+quill logout          # forget the key locally
+```
+
+`quill logout` only removes the local copy. Revoke the key itself at
+[openrouter.ai/settings/keys](https://openrouter.ai/settings/keys).
+
+### Where the key is stored
+
+In your login keyring via `secret-tool` (libsecret) when one is running,
+otherwise in `~/.config/quill/credentials.json` with `0600` permissions. Never in
+`config.toml`, which people commit to dotfiles repos. `$OPENROUTER_API_KEY`
+overrides both if set.
+
+### Free models
+
+The model list is fetched live and filtered to models that are free in both
+directions and actually emit text — the free tier also contains image and music
+models that would fail confusingly on a rewrite. Free models are rate-limited;
+if you hit a 429, Quill tells you to wait or switch back to local.
+
+Two environment variables exist for testing and self-hosted proxies:
+`QUILL_OPENROUTER_API_BASE` and `QUILL_OPENROUTER_AUTH_URL`.
 
 ## Models
 
@@ -234,6 +295,7 @@ instead of answering. Check `think` is not set to `true` in your config.
 
 ```bash
 python3 tests/mock_ollama.py &        # canned streaming responses on :11434
+python3 tests/mock_openrouter.py &    # OpenRouter stand-in that verifies PKCE
 ./bin/quill menu                      # against the mock, no model needed
 python3 tests/paste_harness.py "txet" # a text field to test replacement into
 ```
@@ -247,7 +309,11 @@ src/quill/cli.py          subcommands: menu, run, filter, doctor
 src/quill/ui.py           GTK4 layer-shell popup
 src/quill/hypr.py         hyprctl: cursor, monitors, key injection, focus
 src/quill/clipboard.py    selection capture and in-place replacement
-src/quill/ollama.py       streaming client + output sanitiser
+src/quill/ollama.py       Ollama streaming client
+src/quill/openrouter.py   OpenRouter client + OAuth PKCE sign-in
+src/quill/provider.py     backend dispatch
+src/quill/credentials.py  API key storage (keyring, else 0600 file)
+src/quill/sanitize.py     output sanitiser (provider-neutral)
 src/quill/actions.py      the edit catalogue and prompts
 src/quill/config.py       config.toml loading
 src/quill/state.py        idle/working state for the bar icon
