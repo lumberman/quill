@@ -20,6 +20,7 @@ asks you to translate.
 4. Preserve meaning, intent, names, numbers, URLs, code, placeholders and markup. \
 Preserve the original line structure.
 5. If the text already satisfies the instruction, reply with it unchanged.
+6. Do not change capitalisation except where grammar requires it (sentence starts, proper nouns, the pronoun "I"). Never title-case.
 """
 
 
