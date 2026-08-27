@@ -9,7 +9,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Iterator
 
-from . import codex, ollama, openai_api, openrouter
+from . import codex, models, ollama, openai_api, openrouter
 from .config import CODEX, OLLAMA, OPENAI, OPENROUTER, Config
 
 _ERRORS = (
@@ -73,8 +73,9 @@ def ready(cfg: Config) -> tuple[bool, str]:
         return False, ("Ollama is not running — start it with: "
                        "systemctl start ollama")
     if not ollama.has_model(cfg):
-        return False, f"Model '{cfg.model}' is not installed — ollama pull {cfg.model}"
-    return True, f"Ollama · {cfg.model}"
+        return False, (f"{models.friendly_name(cfg.model)} is not installed — "
+                       f"run: ollama pull {cfg.model}")
+    return True, f"Running on this machine · {models.friendly_name(cfg.model)}"
 
 
 def label(cfg: Config) -> str:
@@ -85,4 +86,4 @@ def label(cfg: Config) -> str:
         return f"OpenAI-compatible · {cfg.openai_model}"
     if cfg.provider == CODEX:
         return f"Codex · {cfg.codex_model or 'default'}"
-    return cfg.model
+    return models.friendly_name(cfg.model)

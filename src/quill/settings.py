@@ -72,8 +72,14 @@ CSS = """
   opacity: 0.4;
 }
 .quill-plus-lg { font-size: 1.6em; }
-.quill-sample text {
-  background: transparent;
+.quill-sample,
+.quill-sample text,
+.quill-sample text selection {
+  background-color: transparent;
+  background-image: none;
+}
+.quill-sample text selection {
+  background-color: alpha(@accent_bg_color, 0.45);
 }
 .quill-sample-frame {
   border: 1px solid alpha(currentColor, 0.16);
@@ -259,10 +265,14 @@ class SettingsWindow(Adw.ApplicationWindow):
         frame.append(self.sample_view)
         box.append(frame)
 
-        # --- step 2 -------------------------------------------------------
+        # --- step 2, hidden until the sample is selected -------------------
+        self.step2_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.step2_box.set_margin_top(10)
+        self.step2_box.set_visible(False)
+        box.append(self.step2_box)
+
         self.step2 = self._step_header(2, "Press the shortcut")
-        self.step2.set_margin_top(10)
-        box.append(self.step2)
+        self.step2_box.append(self.step2)
 
         binds = hypr.binds_matching("quill")
         chord = next((c for c, w in binds if "menu" in w.lower()), "Super + I")
@@ -274,20 +284,23 @@ class SettingsWindow(Adw.ApplicationWindow):
         hint.add_css_class("dim-label")
         hint.set_valign(Gtk.Align.CENTER)
         press.append(hint)
-        box.append(press)
+        self.step2_box.append(press)
 
         self.reset_button = Gtk.Button(label="Reset the sample")
         self.reset_button.add_css_class("flat")
         self.reset_button.set_halign(Gtk.Align.START)
         self.reset_button.set_margin_start(22)
-        self.reset_button.set_visible(False)
         self.reset_button.connect("clicked", lambda *_: self._reset_tutorial())
-        box.append(self.reset_button)
+        self.step2_box.append(self.reset_button)
 
-        # --- step 3 -------------------------------------------------------
+        # --- step 3, hidden until the text is actually replaced ------------
+        self.step3_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.step3_box.set_margin_top(10)
+        self.step3_box.set_visible(False)
+        box.append(self.step3_box)
+
         self.step3 = self._step_header(3, "Quill replaces what you selected")
-        self.step3.set_margin_top(10)
-        box.append(self.step3)
+        self.step3_box.append(self.step3)
 
         self.diff_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.diff_box.add_css_class("quill-result-frame")
@@ -298,19 +311,12 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.diff_after.add_css_class("body")
         self.diff_box.append(self.diff_before)
         self.diff_box.append(self.diff_after)
-        box.append(self.diff_box)
-
-        self.diff_placeholder = Gtk.Label(
-            label="Nothing yet — do steps 1 and 2.", xalign=0)
-        self.diff_placeholder.add_css_class("caption")
-        self.diff_placeholder.add_css_class("dim-label")
-        box.append(self.diff_placeholder)
+        self.step3_box.append(self.diff_box)
 
         group.add(box)
         self._set_step_state(1, "todo")
-        self._set_step_state(2, "waiting")
-        self._set_step_state(3, "waiting")
-        self.diff_box.set_visible(False)
+        self._set_step_state(2, "todo")
+        self._set_step_state(3, "done")
 
     def _step_header(self, number: int, text: str) -> Gtk.Box:
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -354,8 +360,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             return
         self.tutorial_before = selected
         self._set_step_state(1, "done")
-        self._set_step_state(2, "todo")
-        self.reset_button.set_visible(True)
+        self.step2_box.set_visible(True)
 
     def _tutorial_changed(self) -> None:
         """The buffer changing under the paste is what completes step three."""
@@ -366,9 +371,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         if not self.tutorial_before or self.tutorial_before.strip() == current.strip():
             return
         self._set_step_state(2, "done")
-        self._set_step_state(3, "done")
-        self.diff_placeholder.set_visible(False)
-        self.diff_box.set_visible(True)
+        self.step3_box.set_visible(True)
         self.diff_before.set_label(f"was:  {self.tutorial_before.strip()}")
         self.diff_after.set_label(f"now:  {current.strip()}")
 
@@ -376,11 +379,9 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.sample_view.get_buffer().set_text(self.SAMPLE)
         self.tutorial_before = self.SAMPLE
         self._set_step_state(1, "todo")
-        self._set_step_state(2, "waiting")
-        self._set_step_state(3, "waiting")
-        self.diff_box.set_visible(False)
-        self.diff_placeholder.set_visible(True)
-        self.reset_button.set_visible(False)
+        self._set_step_state(2, "todo")
+        self.step2_box.set_visible(False)
+        self.step3_box.set_visible(False)
 
     def _build_shortcuts_group(self) -> None:
         """Reference, not a setting.
@@ -780,12 +781,14 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.model_group = group
         self.page.add(group)
 
-        self.model_row = Adw.ComboRow(title="Model")
-        self.model_row.set_use_markup(False)
-        self.model_row.add_prefix(
-            Gtk.Image.new_from_icon_name("applications-science-symbolic"))
-        self.model_row.connect("notify::selected", lambda *_: self._on_model_changed())
-        group.add(self.model_row)
+        # Radio rows, not a dropdown. There are only ever a handful of models,
+        # the label carries the reason to pick one, and a collapsed ComboRow
+        # truncated that to "Best quality - Gemma ...".
+        self.model_group_card = group
+        self.model_radio_group: Gtk.CheckButton | None = None
+        self.model_radios: dict[str, Gtk.CheckButton] = {}
+        self.model_row_widgets: list[Adw.ActionRow] = []
+        self.other_expander: Adw.ExpanderRow | None = None
 
         # Shown when a model Quill has actually measured is not installed, with
         # the one command needed to get it.
@@ -849,25 +852,80 @@ class SettingsWindow(Adw.ApplicationWindow):
         if self.cfg.model not in installed:
             installed.append(self.cfg.model)
         self.model_ids = models.ordered(installed)
-        self.model_row.set_model(
-            Gtk.StringList.new([models.label_for(m) for m in self.model_ids]))
-        try:
-            self.model_row.set_selected(self.model_ids.index(self.cfg.model))
-        except ValueError:
-            self.model_row.set_selected(0)
+        self._selected_id = (self.cfg.model if self.cfg.model in self.model_ids
+                             else (self.model_ids[0] if self.model_ids
+                                   else self.cfg.model))
+
+        for row in self.model_row_widgets:
+            self.model_group_card.remove(row)
+        if self.other_expander is not None:
+            self.model_group_card.remove(self.other_expander)
+            self.other_expander = None
+        self.model_row_widgets = []
+        self.model_radios = {}
+        self.model_radio_group = None
+
+        def unsuited(model: str) -> bool:
+            note = models.note_for(model)
+            return note is not None and note.tier == models.UNSUITED
+
+        recommended = [m for m in self.model_ids if not unsuited(m)]
+        others = [m for m in self.model_ids if unsuited(m)]
+
+        for model in recommended:
+            row = self._model_row(model)
+            self.model_group_card.add(row)
+            self.model_row_widgets.append(row)
+
+        # The ones Quill measured and rejected are still selectable, but they
+        # do not belong in the same list as the answers.
+        if others:
+            self.other_expander = Adw.ExpanderRow(
+                title="Other models you have installed",
+                subtitle="Quill tested these and does not recommend them")
+            self.other_expander.set_use_markup(False)
+            self.other_expander.add_prefix(
+                Gtk.Image.new_from_icon_name("dialog-warning-symbolic"))
+            for model in others:
+                self.other_expander.add_row(self._model_row(model))
+                if model == self._selected_id:
+                    self.other_expander.set_expanded(True)
+            self.model_group_card.add(self.other_expander)
+            self.model_row_widgets.append(self.other_expander)
+
         self._on_model_changed()
         self._sync_pull_row(installed)
 
-    def _on_model_changed(self) -> None:
-        """Explain the trade-off for whatever is selected, in place."""
-        selected = self._selected_model()
-        self.model_row.set_subtitle(models.describe(selected))
-        self.detail_label.set_label(models.detail(selected) or models.COMPARISON)
-        note = models.note_for(selected)
-        if note and note.tier == models.UNSUITED:
-            self.model_row.add_css_class("error")
+    def _model_row(self, model: str) -> Adw.ActionRow:
+        row = Adw.ActionRow()
+        row.set_use_markup(False)
+        row.set_title(models.label_for(model))
+        row.set_subtitle(models.describe(model))
+
+        radio = Gtk.CheckButton()
+        radio.set_valign(Gtk.Align.CENTER)
+        if self.model_radio_group is None:
+            self.model_radio_group = radio
         else:
-            self.model_row.remove_css_class("error")
+            radio.set_group(self.model_radio_group)
+        radio.set_active(model == self._selected_id)
+        radio.connect("toggled", self._on_radio_toggled, model)
+
+        row.add_prefix(radio)
+        # Clicking anywhere on the row picks it, not just the small circle.
+        row.set_activatable_widget(radio)
+        self.model_radios[model] = radio
+        return row
+
+    def _on_radio_toggled(self, radio: Gtk.CheckButton, model: str) -> None:
+        if radio.get_active():
+            self._selected_id = model
+            self._on_model_changed()
+
+    def _on_model_changed(self) -> None:
+        """Each row carries its own stats; this is the longer explanation."""
+        selected = self._selected_model()
+        self.detail_label.set_label(models.detail(selected) or models.COMPARISON)
         self._refresh_status()
 
     def _sync_pull_row(self, installed: list[str]) -> None:
@@ -916,11 +974,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             self.status_icon.set_from_icon_name("dialog-warning-symbolic")
 
     def _selected_model(self) -> str:
-        """The model id, not the label shown in the dropdown."""
-        index = self.model_row.get_selected()
-        if 0 <= index < len(self.model_ids):
-            return self.model_ids[index]
-        return self.cfg.model
+        return getattr(self, "_selected_id", self.cfg.model)
 
     # -- behaviour ---------------------------------------------------------
     def _build_behaviour_group(self) -> None:

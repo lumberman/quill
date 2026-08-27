@@ -265,9 +265,11 @@ Two environment variables exist for testing and self-hosted proxies:
 
 ## Models
 
-Settings has a **Model** dropdown. It lists what you have pulled, recommended
-models first, and explains the trade-off for whichever one is selected — size,
-typical latency, and how it scored on Quill's own benchmark
+Settings lists the models you have pulled as radio rows — always visible, each
+one saying in plain language what picking it costs you. Models Quill measured
+and rejected are folded into an "Other models you have installed" group so they
+are still reachable without sitting beside the answers. The numbers come from
+Quill's own benchmark
 (`tests/bench_tasks.py`, 14 tasks covering every edit plus Chinese and Russian
 translation, markdown preservation and fact retention):
 

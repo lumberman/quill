@@ -23,25 +23,31 @@ class ModelNote:
     model: str
     tier: str
     headline: str
-    size: str
-    latency: str
-    score: str
+    friendly: str
+    speed: str
+    memory: str
+    accuracy: str
     detail: str
 
     @property
     def choice_label(self) -> str:
-        # The dropdown shows the selected entry on the right of the row, so it
-        # has to stay short or it is ellipsized to nothing useful.
-        return self.model
+        """What the dropdown shows. Plain language first, model name after.
+
+        "gemma4:12b-it-qat" tells someone who has never run a model nothing at
+        all, and four of the entries are equally bad choices for different
+        reasons, so the label has to say both which one it is and whether to
+        pick it.
+        """
+        return f"{self.headline} — {self.friendly}"
 
     @property
     def short(self) -> str:
-        """One line, for the row subtitle."""
-        return f"{self.headline} · {self.size} · ~{self.latency} · scores {self.score}"
+        """One line under the dropdown, in units people already have."""
+        return f"{self.speed} · {self.memory} · {self.accuracy}"
 
     @property
     def summary(self) -> str:
-        return f"{self.size} · ~{self.latency} per edit · {self.score} · {self.detail}"
+        return f"{self.short} · {self.detail}"
 
 
 NOTES: dict[str, ModelNote] = {
@@ -49,65 +55,70 @@ NOTES: dict[str, ModelNote] = {
         model="gemma4:12b-it-qat",
         tier=QUALITY,
         headline="Best quality",
-        size="7.2 GB",
-        latency="315 ms",
-        score="13/14",
+        friendly="Gemma 4 (12B)",
+        speed="Feels instant (0.3s an edit)",
+        memory="Needs 7.2 GB of graphics memory",
+        accuracy="Got 13 of 14 test edits right",
         detail=(
-            "Gets proper nouns, subject-verb agreement and non-English "
-            "orthography right. The one to use if you edit Chinese or Russian."
+            "The most accurate choice, and the one to pick if you write in "
+            "Chinese or Russian. It gets names, capitalisation and accents "
+            "right where the smaller model does not."
         ),
     ),
     "granite4.1:3b": ModelNote(
         model="granite4.1:3b",
         tier=FAST,
-        headline="Fastest usable",
-        size="2.1 GB",
-        latency="113 ms",
-        score="10/14",
+        headline="Faster, less accurate",
+        friendly="Granite 4.1 (3B)",
+        speed="Feels instant (0.1s an edit)",
+        memory="Needs only 2.1 GB of graphics memory",
+        accuracy="Got 10 of 14 test edits right",
         detail=(
-            "Nearly 3x faster and a third of the size. Sometimes leaves a "
-            "sentence uncapitalised, misses proper nouns, and is weaker on "
-            "Russian and Chinese."
-        ),
-    ),
-    # Kept so that picking one does not look like a neutral choice.
-    "llama3.2:1b": ModelNote(
-        model="llama3.2:1b", tier=UNSUITED, headline="Too small",
-        size="1.3 GB", latency="40 ms", score="1/4",
-        detail="Fixes spelling but leaves grammar alone. Not recommended.",
-    ),
-    "qwen3:0.6b": ModelNote(
-        model="qwen3:0.6b", tier=UNSUITED, headline="Too small",
-        size="522 MB", latency="30 ms", score="1/4",
-        detail="Fixes spelling but leaves grammar alone. Not recommended.",
-    ),
-    "gemma3:270m-it-qat": ModelNote(
-        model="gemma3:270m-it-qat", tier=UNSUITED, headline="Too small",
-        size="241 MB", latency="33 ms", score="1/4",
-        detail="Leaves homophones and agreement errors in place. Not recommended.",
-    ),
-    "smollm2:135m": ModelNote(
-        model="smollm2:135m", tier=UNSUITED, headline="Too small",
-        size="270 MB", latency="24 ms", score="1/4",
-        detail=(
-            "Appends an explanation of its own changes, which would be pasted "
-            "into your text. Not recommended."
+            "A third of the size, so it leaves your graphics card free for "
+            "other things. In exchange it sometimes forgets to capitalise a "
+            "sentence, misses names, and is noticeably weaker outside English. "
+            "Worth it on a laptop; not if accuracy matters more than memory."
         ),
     ),
 }
+
+_TOO_SMALL = (
+    "Too small to fix grammar reliably. In testing it corrected the spelling "
+    "and left the grammar alone, which is worse than useless in an editor you "
+    "cannot see working. Only worth trying if nothing larger will run."
+)
+
+for _model, _friendly, _speed, _memory in (
+    ("llama3.2:1b", "Llama 3.2 (1B)", "0.04s an edit", "1.3 GB"),
+    ("qwen3:0.6b", "Qwen 3 (0.6B)", "0.03s an edit", "522 MB"),
+    ("gemma3:270m-it-qat", "Gemma 3 (270M)", "0.03s an edit", "241 MB"),
+    ("smollm2:135m", "SmolLM 2 (135M)", "0.02s an edit", "270 MB"),
+):
+    NOTES[_model] = ModelNote(
+        model=_model, tier=UNSUITED, headline="Not recommended",
+        friendly=_friendly, speed=f"Very fast ({_speed})",
+        memory=f"Needs {_memory}",
+        accuracy="Got only 1 of 4 grammar tests right",
+        detail=_TOO_SMALL,
+    )
 
 # Offered first in the dropdown, in this order.
 RECOMMENDED = ("gemma4:12b-it-qat", "granite4.1:3b")
 
 COMPARISON = (
-    "gemma4:12b — 7.2 GB, ~315 ms, 13/14.   "
-    "granite4.1:3b — 2.1 GB, ~113 ms, 10/14.   "
-    "Both are fast enough to feel instant; the larger one makes fewer mistakes."
+    "Both recommended models feel instant. The larger one makes fewer "
+    "mistakes; the smaller one leaves more graphics memory free."
 )
 
 
 def note_for(model: str) -> ModelNote | None:
     return NOTES.get(model)
+
+
+def friendly_name(model: str) -> str:
+    """A name someone can say out loud, falling back to the raw tag."""
+    note = NOTES.get(model)
+    return note.friendly if note else model
 
 
 def label_for(model: str) -> str:
@@ -120,12 +131,15 @@ def describe(model: str) -> str:
     note = NOTES.get(model)
     if note:
         return note.short
-    return "Not measured by Quill — quality unknown"
+    return "Quill has not tested this one, so there is nothing to promise"
 
 
 def detail(model: str) -> str:
+    """The nuance, with the technical name kept for anyone who wants it."""
     note = NOTES.get(model)
-    return note.detail if note else ""
+    if not note:
+        return f"{model} — not one of the models Quill has measured."
+    return f"{note.detail}  ({note.model})"
 
 
 def ordered(installed: list[str]) -> list[str]:
