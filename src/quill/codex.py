@@ -22,6 +22,15 @@ from pathlib import Path
 
 BINARY = "codex"
 
+# A ChatGPT account restricts which models Codex may use, so the speed knob is
+# reasoning effort, not model choice. Measured: low 4.5s, high 5.5s, same answer.
+EFFORTS = ("low", "medium", "high")
+EFFORT_LABELS = {
+    "low": "Fast — least deliberation",
+    "medium": "Balanced",
+    "high": "Thorough — slowest",
+}
+
 
 class CodexError(RuntimeError):
     pass
@@ -50,6 +59,18 @@ def signed_in() -> bool:
     return auth_mode() is not None
 
 
+def configured_model() -> str:
+    """Whatever the user's own Codex config selects, for display only."""
+    home = os.environ.get("CODEX_HOME") or (Path.home() / ".codex")
+    try:
+        text = (Path(home) / "config.toml").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    import re
+    match = re.search(r'^\s*model\s*=\s*"([^"]+)"', text, re.M)
+    return match.group(1) if match else ""
+
+
 def describe() -> str:
     if not available():
         return "Codex CLI is not installed"
@@ -61,7 +82,7 @@ def describe() -> str:
     return f"Signed in with {mode} (this is billed per token)"
 
 
-def _flatten(messages: list[dict]) -> str:
+def flatten_messages(messages: list[dict]) -> str:
     """Codex takes one prompt string, so fold the system turn into it."""
     system = "\n".join(m["content"] for m in messages if m.get("role") == "system")
     user = "\n".join(m["content"] for m in messages if m.get("role") != "system")
@@ -106,7 +127,9 @@ def stream_chat(cfg, messages: list[dict], temperature: float = 0.2,
         ]
         if cfg.codex_model:
             cmd += ["--model", cfg.codex_model]
-        cmd.append(_flatten(messages))
+        if cfg.codex_effort:
+            cmd += ["-c", f'model_reasoning_effort="{cfg.codex_effort}"']
+        cmd.append(flatten_messages(messages))
 
         try:
             proc = subprocess.Popen(

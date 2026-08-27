@@ -22,10 +22,11 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from . import config as config_mod  # noqa: E402
-from . import codex, credentials, hypr, models, ollama, openai_api, openrouter  # noqa: E402
+from . import claudecode, codex, credentials, hypr, models, ollama  # noqa: E402
+from . import openai_api, openrouter  # noqa: E402
 from . import clipboard, provider, sanitize  # noqa: E402
 from .actions import DEFAULT_ACTIONS, Action, build_messages  # noqa: E402
-from .config import CODEX, OLLAMA, OPENAI, OPENROUTER, Config  # noqa: E402
+from .config import CLAUDECODE, CODEX, OLLAMA, OPENAI, OPENROUTER, Config  # noqa: E402
 
 CSS = """
 .quill-hero {
@@ -145,6 +146,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._build_provider_group()
         self._build_openai_group()
         self._build_codex_group()
+        self._build_claude_group()
         self._build_openrouter_group()
         self._build_model_group()
         self._build_behaviour_group()
@@ -276,20 +278,34 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.step2_box.set_visible(False)
         box.append(self.step2_box)
 
-        self.step2 = self._step_header(2, "Press the shortcut")
+        self.step2 = self._step_header(2, "Press either shortcut")
         self.step2_box.append(self.step2)
 
+        # Both modes, side by side, because they are the two things to learn:
+        # one opens a menu, the other just fixes it.
         binds = hypr.binds_matching("quill")
-        chord = next((c for c, w in binds if "menu" in w.lower()), "Super + I")
-        press = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        press.set_margin_start(26)
-        press.append(self._keycaps(chord))
-        hint = Gtk.Label(label='then choose "Fix Spelling & Grammar"')
-        hint.add_css_class("caption")
-        hint.add_css_class("dim-label")
-        hint.set_valign(Gtk.Align.CENTER)
-        press.append(hint)
-        self.step2_box.append(press)
+        menu_chord = next((c for c, w in binds if "menu" in w.lower()), "Super + I")
+        quick_chord = next((c for c, w in binds if "menu" not in w.lower()), None)
+
+        modes = [(menu_chord, "Opens a menu — pick any edit")]
+        if quick_chord:
+            modes.append((quick_chord, "Fixes grammar straight away, no menu"))
+
+        picker = Gtk.Grid()
+        picker.set_column_spacing(12)
+        picker.set_row_spacing(8)
+        picker.set_margin_start(26)
+        for index, (chord, what) in enumerate(modes):
+            keys = self._keycaps(chord)
+            keys.set_halign(Gtk.Align.END)
+            keys.set_valign(Gtk.Align.CENTER)
+            picker.attach(keys, 0, index, 1, 1)
+            label = Gtk.Label(label=what, xalign=0)
+            label.set_valign(Gtk.Align.CENTER)
+            label.add_css_class("caption")
+            label.add_css_class("dim-label")
+            picker.attach(label, 1, index, 1, 1)
+        self.step2_box.append(picker)
 
         self.reset_button = Gtk.Button(label="Reset the sample")
         self.reset_button.add_css_class("flat")
@@ -436,11 +452,12 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.provider_row = Adw.ComboRow(title="Provider")
         self.provider_row.add_prefix(
             Gtk.Image.new_from_icon_name("network-server-symbolic"))
-        self.provider_order = [OLLAMA, OPENAI, CODEX, OPENROUTER]
+        self.provider_order = [OLLAMA, OPENAI, CODEX, CLAUDECODE, OPENROUTER]
         self.provider_row.set_model(Gtk.StringList.new([
             "On this machine (Ollama)",
             "OpenAI-compatible server",
             "ChatGPT subscription (Codex CLI)",
+            "Claude subscription (Claude Code)",
             "OpenRouter (cloud)",
         ]))
         try:
@@ -506,6 +523,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.openrouter_group.set_visible(active == OPENROUTER)
         self.openai_group.set_visible(active == OPENAI)
         self.codex_group.set_visible(active == CODEX)
+        self.claude_group.set_visible(active == CLAUDECODE)
         self.model_group.set_visible(active == OLLAMA)
 
         probe = replace(self.cfg, provider=active,
@@ -516,6 +534,8 @@ class SettingsWindow(Adw.ApplicationWindow):
             note, tone = "Nothing leaves this machine", "success"
         elif active == CODEX:
             note, tone = "Sent to OpenAI on your ChatGPT plan", "warning"
+        elif active == CLAUDECODE:
+            note, tone = "Sent to Anthropic on your Claude plan", "warning"
         elif active == OPENROUTER:
             note, tone = "Sent to OpenRouter — free models may train on it", "warning"
         else:
@@ -736,6 +756,77 @@ class SettingsWindow(Adw.ApplicationWindow):
             if names else "The server reported no models"
         )
 
+    def _radio_picker(self, group, options, current, on_pick):
+        """Always-visible radio rows. Same control as the model list."""
+        first: Gtk.CheckButton | None = None
+        radios: dict[str, Gtk.CheckButton] = {}
+        for value, title, subtitle in options:
+            row = Adw.ActionRow()
+            row.set_use_markup(False)
+            row.set_title(title)
+            if subtitle:
+                row.set_subtitle(subtitle)
+            radio = Gtk.CheckButton()
+            radio.set_valign(Gtk.Align.CENTER)
+            if first is None:
+                first = radio
+            else:
+                radio.set_group(first)
+            radio.set_active(value == current)
+            radio.connect("toggled",
+                          lambda r, v=value: on_pick(v) if r.get_active() else None)
+            row.add_prefix(radio)
+            row.set_activatable_widget(radio)
+            group.add(row)
+            radios[value] = radio
+        return radios
+
+    # -- claude code -------------------------------------------------------
+    def _build_claude_group(self) -> None:
+        self.claude_group = Adw.PreferencesGroup(
+            title="Claude subscription",
+            description=("Runs edits through Anthropic's Claude Code CLI, signed "
+                         "in with your Claude account. That uses your plan "
+                         "instead of metered API tokens."),
+        )
+        self.page.add(self.claude_group)
+
+        self.claude_status_row = Adw.ActionRow()
+        self.claude_status_row.set_use_markup(False)
+        self.claude_status_row.set_title("Claude Code")
+        signin = Gtk.Button(label="Sign in")
+        signin.set_valign(Gtk.Align.CENTER)
+        signin.connect("clicked", lambda *_: self._claude_login())
+        self.claude_status_row.add_suffix(signin)
+        self.claude_group.add(self.claude_status_row)
+
+        self._claude_model = self.cfg.claude_model or claudecode.DEFAULT_MODEL
+
+        def pick(value):
+            self._claude_model = value
+            self._refresh_status()
+
+        self._radio_picker(
+            self.claude_group,
+            [(m, claudecode.MODEL_LABELS.get(m, m),
+              "Recommended — quickest to come back" if m == claudecode.DEFAULT_MODEL else "")
+             for m in claudecode.MODELS],
+            self._claude_model, pick)
+        self._sync_claude_row()
+
+    def _sync_claude_row(self) -> None:
+        self.claude_status_row.set_subtitle(claudecode.describe())
+
+    def _claude_login(self) -> None:
+        exe = claudecode.binary()
+        if not exe:
+            self._toast("Claude Code is not installed")
+            return
+        Gio.Subprocess.new(
+            ["omarchy-launch-floating-terminal-with-presentation", exe],
+            Gio.SubprocessFlags.NONE)
+        self._toast("Sign in there, then press refresh")
+
     # -- codex -------------------------------------------------------------
     def _build_codex_group(self) -> None:
         self.codex_group = Adw.PreferencesGroup(
@@ -757,9 +848,32 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.codex_status_row.add_suffix(signin)
         self.codex_group.add(self.codex_status_row)
 
-        self.codex_model_row = Adw.EntryRow(title="Model (blank = Codex default)")
+        configured = codex.configured_model()
+        model_row = Adw.ActionRow()
+        model_row.set_use_markup(False)
+        model_row.set_title("Model")
+        model_row.set_subtitle(
+            f"{configured} — set in your Codex config. A ChatGPT account "
+            f"restricts which models Codex may use, so speed is set below."
+            if configured else
+            "Chosen by Codex. A ChatGPT account restricts the options.")
+        self.codex_group.add(model_row)
+
+        self._codex_effort = self.cfg.codex_effort or "low"
+
+        def pick_effort(value):
+            self._codex_effort = value
+            self._refresh_status()
+
+        self._radio_picker(
+            self.codex_group,
+            [(e, codex.EFFORT_LABELS.get(e, e),
+              "Recommended for editing" if e == "low" else "")
+             for e in codex.EFFORTS],
+            self._codex_effort, pick_effort)
+
+        self.codex_model_row = Adw.EntryRow(title="Model override (advanced)")
         self.codex_model_row.set_text(self.cfg.codex_model)
-        self.codex_group.add(self.codex_model_row)
 
         speed = Adw.ActionRow()
         speed.set_use_markup(False)
@@ -964,6 +1078,7 @@ class SettingsWindow(Adw.ApplicationWindow):
 
     def _refresh_all(self) -> None:
         self._sync_codex_row()
+        self._sync_claude_row()
         self._sync_openai_key_row()
         self._refresh_status(reload_models=True)
 
@@ -1182,6 +1297,8 @@ class SettingsWindow(Adw.ApplicationWindow):
         cfg.openai_model = (self.openai_model_row.get_text().strip()
                             or self.cfg.openai_model)
         cfg.codex_model = self.codex_model_row.get_text().strip()
+        cfg.codex_effort = getattr(self, "_codex_effort", cfg.codex_effort)
+        cfg.claude_model = getattr(self, "_claude_model", cfg.claude_model)
         cfg.host = self.host_row.get_text().strip() or self.cfg.host
         index = self.keep_alive_row.get_selected()
         cfg.keep_alive = (self.keep_alive_values[index]

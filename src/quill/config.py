@@ -19,7 +19,8 @@ OLLAMA = "ollama"
 OPENROUTER = "openrouter"
 OPENAI = "openai"
 CODEX = "codex"
-PROVIDERS = (OLLAMA, OPENROUTER, OPENAI, CODEX)
+CLAUDECODE = "claudecode"
+PROVIDERS = (OLLAMA, OPENROUTER, OPENAI, CODEX, CLAUDECODE)
 
 
 def config_path() -> Path:
@@ -55,6 +56,10 @@ class Config:
     openai_model: str = "local-model"
     # Empty means "whatever Codex is configured to use".
     codex_model: str = ""
+    # Codex's real speed lever; a ChatGPT account restricts model choice.
+    codex_effort: str = "low"
+    # Alias the Claude Code CLI accepts. Haiku is the fastest.
+    claude_model: str = "haiku"
     actions: list[Action] = field(default_factory=lambda: list(DEFAULT_ACTIONS))
     # Where this config was loaded from, so saving writes back to the same
     # file. Without it `--config X` would load X and then overwrite the
@@ -72,6 +77,10 @@ class Config:
     @property
     def uses_codex(self) -> bool:
         return self.provider == CODEX
+
+    @property
+    def uses_claudecode(self) -> bool:
+        return self.provider == CLAUDECODE
 
     @property
     def is_local(self) -> bool:
@@ -92,6 +101,8 @@ class Config:
             return self.openai_model
         if self.uses_codex:
             return self.codex_model or "codex default"
+        if self.uses_claudecode:
+            return self.claude_model
         return self.model
 
     @property
@@ -162,6 +173,8 @@ def load(path: Path | None = None) -> Config:
     cfg.openai_base_url = str(raw.get("openai_base_url", cfg.openai_base_url))
     cfg.openai_model = str(raw.get("openai_model", cfg.openai_model))
     cfg.codex_model = str(raw.get("codex_model", cfg.codex_model))
+    cfg.codex_effort = str(raw.get("codex_effort", cfg.codex_effort))
+    cfg.claude_model = str(raw.get("claude_model", cfg.claude_model))
     cfg.host = str(raw.get("host", cfg.host))
     cfg.keep_alive = str(raw.get("keep_alive", cfg.keep_alive))
     cfg.num_ctx = int(raw.get("num_ctx", cfg.num_ctx))
@@ -205,7 +218,8 @@ def dumps(cfg: Config) -> str:
     for key in ("provider", "model", "host", "keep_alive", "num_ctx",
                 "request_timeout", "restore_clipboard", "auto_replace",
                 "openrouter_model", "openrouter_free_only",
-                "openai_base_url", "openai_model", "codex_model"):
+                "openai_base_url", "openai_model", "codex_model",
+                "codex_effort", "claude_model"):
         lines.append(f"{key} = {_toml_value(getattr(cfg, key))}")
     if cfg.think is not None:
         lines.append(f"think = {_toml_value(cfg.think)}")

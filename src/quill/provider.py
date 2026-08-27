@@ -9,14 +9,15 @@ from __future__ import annotations
 import threading
 from collections.abc import Iterator
 
-from . import codex, models, ollama, openai_api, openrouter
-from .config import CODEX, OLLAMA, OPENAI, OPENROUTER, Config
+from . import claudecode, codex, models, ollama, openai_api, openrouter
+from .config import CLAUDECODE, CODEX, OLLAMA, OPENAI, OPENROUTER, Config
 
 _ERRORS = (
     ollama.OllamaError,
     openrouter.OpenRouterError,
     openai_api.OpenAIError,
     codex.CodexError,
+    claudecode.ClaudeCodeError,
 )
 
 
@@ -33,6 +34,8 @@ def stream_chat(cfg: Config, messages: list[dict], temperature: float = 0.2,
             yield from openai_api.stream_chat(cfg, messages, temperature, cancel)
         elif cfg.provider == CODEX:
             yield from codex.stream_chat(cfg, messages, temperature, cancel)
+        elif cfg.provider == CLAUDECODE:
+            yield from claudecode.stream_chat(cfg, messages, temperature, cancel)
         else:
             yield from ollama.stream_chat(cfg, messages, temperature, cancel)
     except _ERRORS as exc:
@@ -42,7 +45,7 @@ def stream_chat(cfg: Config, messages: list[dict], temperature: float = 0.2,
 
 def streams_incrementally(cfg: Config) -> bool:
     """False when the answer only arrives all at once, so the UI can say so."""
-    return cfg.provider != CODEX
+    return cfg.provider not in (CODEX, CLAUDECODE)
 
 
 def ready(cfg: Config) -> tuple[bool, str]:
@@ -61,6 +64,13 @@ def ready(cfg: Config) -> tuple[bool, str]:
         if not openai_api.is_up(cfg):
             return False, f"Cannot reach {cfg.openai_base_url}"
         return True, f"{cfg.openai_base_url} · {cfg.openai_model}"
+
+    if cfg.provider == CLAUDECODE:
+        if not claudecode.available():
+            return False, "Claude Code is not installed"
+        if not claudecode.signed_in():
+            return False, "Claude Code is not signed in — run: claude"
+        return True, claudecode.describe()
 
     if cfg.provider == CODEX:
         if not codex.available():
@@ -85,5 +95,7 @@ def label(cfg: Config) -> str:
     if cfg.provider == OPENAI:
         return f"OpenAI-compatible · {cfg.openai_model}"
     if cfg.provider == CODEX:
-        return f"Codex · {cfg.codex_model or 'default'}"
+        return f"Codex · {cfg.codex_model or codex.configured_model() or 'default'}"
+    if cfg.provider == CLAUDECODE:
+        return f"Claude Code · {cfg.claude_model}"
     return models.friendly_name(cfg.model)

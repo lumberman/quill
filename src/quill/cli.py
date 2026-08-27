@@ -10,7 +10,7 @@ import sys
 import threading
 from pathlib import Path
 
-from . import clipboard, codex, hypr, ollama, openai_api, openrouter
+from . import claudecode, clipboard, codex, hypr, ollama, openai_api, openrouter
 from . import config as config_mod
 from . import provider, sanitize, state
 from .actions import build_messages
@@ -247,6 +247,10 @@ def cmd_doctor(args, cfg: Config) -> int:
         print(f"api key      {openai_api.key_source() or '(none stored)'}")
     elif cfg.uses_codex:
         print(f"codex        {codex.describe()}")
+        print(f"model        {codex.configured_model() or '(codex default)'}")
+        print(f"effort       {cfg.codex_effort}")
+    elif cfg.uses_claudecode:
+        print(f"claude code  {claudecode.describe()}")
     else:
         print(f"host         {cfg.host}")
 

@@ -7,6 +7,7 @@
 #   "ollama"     local, the default
 #   "openai"     any OpenAI-compatible server (LM Studio, llama.cpp, vLLM, ...)
 #   "codex"      your ChatGPT subscription, via `codex login`
+#   "claudecode" your Claude subscription, via `claude`
 #   "openrouter" cloud, free tier available, via `quill login`
 provider = "ollama"
 
@@ -18,8 +19,15 @@ openai_base_url = "http://127.0.0.1:1234/v1"
 openai_model = "local-model"
 
 # --- ChatGPT subscription --------------------------------------------------
-# Used when provider = "codex". Blank means whatever Codex is configured to use.
+# Used when provider = "codex". A ChatGPT account restricts which models Codex
+# may use, so the speed lever is reasoning effort: "low", "medium" or "high".
 codex_model = ""
+codex_effort = "low"
+
+# --- Claude subscription ---------------------------------------------------
+# Used when provider = "claudecode". An alias the Claude Code CLI accepts:
+# haiku (fastest), fable, sonnet, opus.
+claude_model = "haiku"
 
 # --- OpenRouter ------------------------------------------------------------
 # Used when provider = "openrouter".
