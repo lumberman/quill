@@ -1,26 +1,45 @@
 # Quill
 
-A local-AI writing assistant for [Omarchy](https://omarchy.org). Select text in
-any application, press **SUPER+I** (or **SUPER+SHIFT+right-click**), pick an
-edit, and Quill replaces the selection in place.
+**Fix or rewrite text anywhere on your desktop with one keystroke — on-device,
+so your words never leave the machine.**
 
-By default everything runs on your own machine through
-[Ollama](https://ollama.com): no text leaves the computer and it works offline.
-Four backends are available, and the settings window always states whether the
-selected text stays local:
-
-| Backend | Cost | Text leaves the machine |
-|---|---|---|
-| **Ollama** (default) | free | no |
-| **OpenAI-compatible server** | free locally | only if the URL is remote |
-| **ChatGPT subscription** via Codex CLI | your existing plan | yes |
-| **OpenRouter** | free tier or paid | yes |
+Select text in any application — browser, editor, terminal, chat — press
+**Super+I**, pick an edit, and Quill replaces the selection in place. There is
+no window to switch to, nothing to paste into, and no round trip through a
+chat box.
 
 ```
 Fix Spelling & Grammar   Rewrite for Clarity   Make It Shorter
 Professional Tone        Friendly Tone         Plain English
 Expand                   Translate to English  Custom Instruction…
 ```
+
+Or skip the menu entirely: **Super+Shift+I** fixes the grammar of whatever is
+selected and puts it back, with no popup at all. Any edit in the list can take
+a shortcut of its own.
+
+### It runs on your own machine
+
+By default every edit goes through [Ollama](https://ollama.com) on your own
+GPU. No account, no API key, no network — it works on a plane. Quill ships no
+model; you pick one in settings, which explains the trade-off in plain language
+and downloads it for you.
+
+Prefer a subscription you already pay for? Five backends are available, and the
+settings window always states, in words, whether the selected text is about to
+leave the computer:
+
+| Backend | Cost | Text leaves the machine |
+|---|---|---|
+| **Ollama** (default) | free | no |
+| **OpenAI-compatible server** | free locally | only if the URL is remote |
+| **ChatGPT subscription** via Codex CLI | your existing plan | yes |
+| **Claude subscription** via Claude Code | your existing plan | yes |
+| **OpenRouter** | free tier or paid | yes |
+
+Built for [Omarchy](https://omarchy.org) and Hyprland: a cursor-positioned
+popup, a bar icon that spins while it thinks, and a libadwaita settings window
+with a playground you can practise in before touching your own text.
 
 ---
 
