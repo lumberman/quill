@@ -82,7 +82,6 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._build_theme_note()
 
         self._ready = True
-        self._refresh_brand_status()
         self._sync_account_row()
         self._sync_provider()
         self._refresh_provider_badges()
@@ -141,7 +140,8 @@ class SettingsWindow(Adw.ApplicationWindow):
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
         row.set_halign(Gtk.Align.START)
-        row.set_margin_top(16)
+        row.set_margin_top(18)
+        row.set_margin_bottom(10)
 
         icon = branding.icon_path()
         if icon:
@@ -150,27 +150,25 @@ class SettingsWindow(Adw.ApplicationWindow):
             mark.set_valign(Gtk.Align.CENTER)
             row.append(mark)
 
-        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
         text.set_valign(Gtk.Align.CENTER)
+
+        titles = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         name = Gtk.Label(label=branding.NAME, xalign=0)
         name.add_css_class("quill-app-name")
-        self.brand_status = Gtk.Label(label="", xalign=0)
-        self.brand_status.add_css_class("quill-app-status")
-        text.append(name)
-        text.append(self.brand_status)
+        version = Gtk.Label(label=branding.VERSION, xalign=0)
+        version.add_css_class("quill-version")
+        version.set_valign(Gtk.Align.BASELINE)
+        titles.append(name)
+        titles.append(version)
+        text.append(titles)
+
+        what = Gtk.Label(label=branding.SHORT.upper(), xalign=0)
+        what.add_css_class("quill-app-status")
+        text.append(what)
         row.append(text)
 
         group.add(row)
-
-    def _refresh_brand_status(self) -> None:
-        """Where edits run, in the header's capital line."""
-        if not getattr(self, "_ready", False):
-            return                 # _collect() reads widgets that may not exist yet
-        cfg = self._collect()
-        line = provider.label(cfg)
-        if cfg.provider == OLLAMA:
-            line = f"On this machine · {line}"
-        self.brand_status.set_label(line.upper())
 
     def _build_hero(self) -> None:
         """Keys on the left, what they do on the right.
@@ -179,15 +177,17 @@ class SettingsWindow(Adw.ApplicationWindow):
         each other, and each description reads straight across from the keys it
         belongs to instead of sitting underneath them.
         """
-        group = Adw.PreferencesGroup()
+        group = Adw.PreferencesGroup(
+            title="HOW TO USE",
+            description="Select any text in any app, then press one of these.",
+        )
         self.page.add(group)
 
-        group.add_css_class("quill-plain")
         self.hero_grid = Gtk.Grid()
         grid = self.hero_grid
         grid.add_css_class("quill-hero")
         grid.set_column_spacing(18)
-        grid.set_row_spacing(10)
+        grid.set_row_spacing(12)
         grid.set_halign(Gtk.Align.START)
         group.add(grid)
         self._fill_hero()
@@ -204,9 +204,9 @@ class SettingsWindow(Adw.ApplicationWindow):
         primary = next((c for c, w in binds if "menu" in w.lower()), "Super + I")
         secondary = next((c for c, w in binds if "menu" not in w.lower()), None)
 
-        rows = [(primary, "Select text in any app, then press this")]
+        rows = [(primary, "Opens the menu — pick any edit")]
         if secondary:
-            rows.append((secondary, "Fix grammar in place, without the popup"))
+            rows.append((secondary, "Fixes grammar in place, no popup"))
 
         # One size for both: they are two equal ways to do the same job, and
         # sizing one of them up implied a hierarchy that is not there.
@@ -803,7 +803,6 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.privacy_icon.set_from_icon_name(
             "security-high-symbolic" if tone == "success"
             else "dialog-warning-symbolic")
-        self._refresh_brand_status()
         self._refresh_status()
 
     # -- openrouter --------------------------------------------------------
@@ -1496,7 +1495,6 @@ class SettingsWindow(Adw.ApplicationWindow):
         """Each row carries its own stats; this is the longer explanation."""
         selected = self._selected_model()
         self.detail_label.set_label(models.detail(selected) or models.COMPARISON)
-        self._refresh_brand_status()
         self._refresh_status()
 
     def _sync_pull_row(self, installed: list[str]) -> None:

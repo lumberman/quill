@@ -442,6 +442,7 @@ preferencesgroup > box > box.header label.heading {{
 preferencesgroup > box > box.header label.body.dimmed {{
   opacity: 0.45;
   margin-top: 6px;
+  margin-bottom: 8px;
 }}
 
 /* Rows: flat, and only the current one is filled. */
@@ -544,7 +545,12 @@ progressbar > trough > progress {{
   padding: 8px 0 0 0;
 }}
 .quill-hero {{
-  padding: 20px 0 16px 0;
+  padding: 16px 0 18px 0;
+}}
+/* The version, beside the wordmark: present, not competing with it. */
+.quill-version {{
+  font-size: 0.8em;
+  opacity: 0.45;
 }}
 .quill-tutorial {{
   padding: 16px 16px 18px 16px;
