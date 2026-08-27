@@ -465,11 +465,23 @@ button:focus-visible, .quill-segment button:focus-visible {{
   outline: 2px solid @accent_color;
   outline-offset: 1px;
 }}
-row.quill-current {{
-  background-color: alpha(@window_fg_color, 0.09);
-  box-shadow: inset 0 0 0 1px alpha(@window_fg_color, 0.20);
+/* A choice is a field you can point at: outlined, spaced from its
+   neighbours, filled and ticked when it is the one in use. The same control
+   as the segmented buttons below, stacked because each option carries a line
+   of explanation. */
+row.quill-option {{
+  border: 1px solid alpha(@window_fg_color, 0.24);
+  border-radius: {small}px;
+  margin: 3px 0;
+}}
+row.quill-option.quill-current {{
+  background-color: alpha(@window_fg_color, 0.10);
+  border-color: alpha(@window_fg_color, 0.55);
 }}
 row.quill-current > box.header > box.title > label.title {{
+  color: @accent_color;
+}}
+.quill-tick {{
   color: @accent_color;
 }}
 

@@ -1059,44 +1059,58 @@ class SettingsWindow(Adw.ApplicationWindow):
         return box
 
     def _choice_rows(self, group, options, current, on_pick, icons=None):
-        """A list of choices with no radio circles.
+        """Each option is a field of its own; the chosen one is ticked.
 
-        None of the shell's panels draws a radio. The chosen network, the
-        connected device, the active output: each is marked by filling its
-        row and colouring the label, and the rest are plain. Carrying both a
-        radio and a fill would say the same thing twice.
+        The same control as the shell's segmented buttons -- an outlined box
+        you can point at, filled when it is the one in use -- but stacked,
+        because these options carry a line of explanation each and would not
+        fit across a row.
         """
         rows: dict[str, Adw.ActionRow] = {}
+        ticks: dict[str, Gtk.Image] = {}
         self._badges: dict[str, Gtk.Label] = getattr(self, "_badges", {})
 
         def mark(value: str) -> None:
             for key, row in rows.items():
-                if key == value:
+                chosen = key == value
+                if chosen:
                     row.add_css_class("quill-current")
                 else:
                     row.remove_css_class("quill-current")
+                # The tick keeps its place either way, so no row reflows when
+                # the choice moves.
+                ticks[key].set_opacity(1.0 if chosen else 0.0)
 
         for option in options:
             value, title, subtitle = option[0], option[1], option[2]
             badge_text = option[3] if len(option) > 3 else None
             row = Adw.ActionRow()
             row.set_use_markup(False)
+            row.add_css_class("quill-option")
             row.set_title(title)
             if subtitle:
                 row.set_subtitle(subtitle)
+
             if icons and icons.get(value):
                 image = Gtk.Image.new_from_icon_name(icons[value])
                 image.set_valign(Gtk.Align.CENTER)
                 row.add_prefix(image)
+
             if badge_text is not None:
                 badge = Gtk.Label(label="")
                 badge.set_valign(Gtk.Align.CENTER)
                 badge.add_css_class("quill-badge")
                 row.add_suffix(badge)
                 self._badges[value] = badge
+
+            tick = Gtk.Image.new_from_icon_name("object-select-symbolic")
+            tick.set_valign(Gtk.Align.CENTER)
+            tick.add_css_class("quill-tick")
+            row.add_suffix(tick)
+            ticks[value] = tick
+
             row.set_activatable(True)
-            row.connect("activated",
-                        lambda _r, v=value: (mark(v), on_pick(v)))
+            row.connect("activated", lambda _r, v=value: (mark(v), on_pick(v)))
             group.add(row)
             rows[value] = row
 
@@ -1126,12 +1140,25 @@ class SettingsWindow(Adw.ApplicationWindow):
         buttons.set_homogeneous(True)
         first: Gtk.ToggleButton | None = None
         for value, label in options:
-            button = Gtk.ToggleButton(label=label)
+            button = Gtk.ToggleButton()
+            content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            content.set_halign(Gtk.Align.CENTER)
+            tick = Gtk.Image.new_from_icon_name("object-select-symbolic")
+            tick.add_css_class("quill-tick")
+            content.append(Gtk.Label(label=label))
+            content.append(tick)          # trailing, as on the option rows
+            button.set_child(content)
             if first is None:
                 first = button
             else:
                 button.set_group(first)
             button.set_active(value == current)
+            # The tick only shows on the chosen one, but it is always in the
+            # box, so the label does not shift when the choice changes.
+            tick.set_opacity(1.0 if value == current else 0.0)
+            button.connect("notify::active",
+                           lambda b, _p, t=tick: t.set_opacity(
+                               1.0 if b.get_active() else 0.0))
             button.connect("toggled",
                            lambda b, v=value: on_pick(v) if b.get_active() else None)
             buttons.append(button)
@@ -1292,6 +1319,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         # truncated that to "Best quality - Gemma ...".
         self.model_group_card = group
         self.model_rows: dict[str, Adw.ActionRow] = {}
+        self.model_ticks: dict[str, Gtk.Image] = {}
         self.model_row_widgets: list[Adw.ActionRow] = []
         self.other_expander: Adw.ExpanderRow | None = None
         self._downloads: dict[str, threading.Event] = {}
@@ -1377,6 +1405,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             self.other_expander = None
         self.model_row_widgets = []
         self.model_rows = {}
+        self.model_ticks = {}
 
         def unsuited(model: str) -> bool:
             note = models.note_for(model)
@@ -1431,9 +1460,15 @@ class SettingsWindow(Adw.ApplicationWindow):
             return self._download_row(row, model)
 
         row.set_subtitle(models.describe(model))
-        image = Gtk.Image.new_from_icon_name("computer-symbolic")
-        image.set_valign(Gtk.Align.CENTER)
-        row.add_prefix(image)
+
+        row.add_css_class("quill-option")
+        tick = Gtk.Image.new_from_icon_name("object-select-symbolic")
+        tick.set_valign(Gtk.Align.CENTER)
+        tick.add_css_class("quill-tick")
+        tick.set_opacity(1.0 if model == self._selected_id else 0.0)
+        row.add_suffix(tick)
+        self.model_ticks[model] = tick
+
         row.set_activatable(True)
         row.connect("activated", lambda _r, m=model: self._on_model_picked(m))
         if model == self._selected_id:
@@ -1512,10 +1547,12 @@ class SettingsWindow(Adw.ApplicationWindow):
     def _on_model_picked(self, model: str) -> None:
         self._selected_id = model
         for name, row in self.model_rows.items():
-            if name == model:
+            chosen = name == model
+            if chosen:
                 row.add_css_class("quill-current")
             else:
                 row.remove_css_class("quill-current")
+            self.model_ticks[name].set_opacity(1.0 if chosen else 0.0)
         self._on_model_changed()
 
     def _on_model_changed(self) -> None:
