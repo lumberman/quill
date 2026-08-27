@@ -40,28 +40,38 @@ CSS = """
 .quill-secondary {
   padding: 8px 4px 0 4px;
 }
-/* Keycaps. The thicker bottom border is what reads as a physical key. */
+/* Keycaps. A thick border-bottom renders as a flange outside the rounded
+   corners, so the depth comes from stacked box-shadows instead: one hard
+   offset for the key's side wall, one soft one for the shadow it casts. The
+   inset highlight along the top edge is what stops a black key reading as a
+   hole on a dark background. */
 .quill-keycap {
-  background-color: #0b0b0d;
-  color: #f2f2f4;
-  border: 1px solid alpha(#ffffff, 0.16);
-  border-bottom: 3px solid #000000;
-  border-radius: 8px;
-  padding: 5px 12px;
-  font-weight: 800;
+  background-image: linear-gradient(180deg, #26262b 0%, #131316 60%, #0e0e11 100%);
+  color: #f4f4f6;
+  border: 1px solid alpha(#ffffff, 0.13);
+  border-radius: 7px;
+  padding: 5px 11px;
+  min-width: 15px;
+  font-weight: 700;
+  box-shadow: inset 0 1px 0 alpha(#ffffff, 0.13),
+              0 2px 0 #08080a,
+              0 3px 5px alpha(#000000, 0.5);
 }
 .quill-keycap-lg {
-  font-size: 2.1em;
-  padding: 10px 22px;
-  border-radius: 12px;
-  border-bottom-width: 5px;
+  font-size: 1.75em;
+  padding: 9px 20px;
+  min-width: 34px;
+  border-radius: 11px;
+  box-shadow: inset 0 1.5px 0 alpha(#ffffff, 0.15),
+              0 4px 0 #08080a,
+              0 6px 10px alpha(#000000, 0.55);
 }
 .quill-plus {
-  font-size: 1.3em;
+  font-size: 1.15em;
   font-weight: 700;
-  opacity: 0.45;
+  opacity: 0.4;
 }
-.quill-plus-lg { font-size: 2.0em; }
+.quill-plus-lg { font-size: 1.6em; }
 .quill-sample text {
   background: transparent;
 }
@@ -153,8 +163,11 @@ class SettingsWindow(Adw.ApplicationWindow):
     def _keycaps(chord: str, large: bool = False) -> Gtk.Box:
         """Render "Super + Shift + I" as separate keys rather than a string."""
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
-                      spacing=10 if large else 6)
+                      spacing=9 if large else 6)
         box.set_halign(Gtk.Align.CENTER)
+        # Room for the drop shadow, or the next widget clips it.
+        box.set_margin_bottom(7 if large else 4)
+        box.set_margin_top(2)
         parts = [p.strip() for p in chord.split("+") if p.strip()]
         for index, part in enumerate(parts):
             if index:
