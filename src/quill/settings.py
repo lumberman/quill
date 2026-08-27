@@ -82,6 +82,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._build_theme_note()
 
         self._ready = True
+        self._refresh_brand_status()
         self._sync_account_row()
         self._sync_provider()
         self._refresh_provider_badges()
@@ -94,6 +95,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         if palette is None:
             return
         group = Adw.PreferencesGroup()
+        group.add_css_class("quill-plain")
         self.page.add(group)
         name = palette.name.replace("-", " ").title() or "your theme"
         group.add(self._caption_line(
@@ -127,31 +129,48 @@ class SettingsWindow(Adw.ApplicationWindow):
         return box
 
     def _build_brand(self) -> None:
+        """Mark, name, and a line of tracked capitals saying where it stands.
+
+        The shell's panels all open this way -- Bluetooth over UNTANGLING
+        WIRES, Claude Code over MAX 5X. The second line is status, not a
+        slogan, so this one reports the backend actually in use.
+        """
         group = Adw.PreferencesGroup()
+        group.add_css_class("quill-plain")
         self.page.add(group)
 
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
         row.set_halign(Gtk.Align.START)
-        row.set_margin_top(14)
+        row.set_margin_top(16)
 
         icon = branding.icon_path()
         if icon:
             mark = Gtk.Image.new_from_file(icon)
-            mark.set_pixel_size(52)
+            mark.set_pixel_size(46)
+            mark.set_valign(Gtk.Align.CENTER)
             row.append(mark)
 
-        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         text.set_valign(Gtk.Align.CENTER)
         name = Gtk.Label(label=branding.NAME, xalign=0)
-        name.add_css_class("title-1")
-        tagline = Gtk.Label(label=branding.TAGLINE, xalign=0)
-        tagline.add_css_class("caption")
-        tagline.add_css_class("dim-label")
+        name.add_css_class("quill-app-name")
+        self.brand_status = Gtk.Label(label="", xalign=0)
+        self.brand_status.add_css_class("quill-app-status")
         text.append(name)
-        text.append(tagline)
+        text.append(self.brand_status)
         row.append(text)
 
         group.add(row)
+
+    def _refresh_brand_status(self) -> None:
+        """Where edits run, in the header's capital line."""
+        if not getattr(self, "_ready", False):
+            return                 # _collect() reads widgets that may not exist yet
+        cfg = self._collect()
+        line = provider.label(cfg)
+        if cfg.provider == OLLAMA:
+            line = f"On this machine · {line}"
+        self.brand_status.set_label(line.upper())
 
     def _build_hero(self) -> None:
         """Keys on the left, what they do on the right.
@@ -163,6 +182,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         group = Adw.PreferencesGroup()
         self.page.add(group)
 
+        group.add_css_class("quill-plain")
         self.hero_grid = Gtk.Grid()
         grid = self.hero_grid
         grid.add_css_class("quill-hero")
@@ -217,7 +237,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         popup, which pastes back into this very field.
         """
         group = Adw.PreferencesGroup(
-            title="Playground",
+            title="PLAYGROUND",
             description="Practise on this text; your own documents are untouched.",
         )
         self.page.add(group)
@@ -601,8 +621,18 @@ class SettingsWindow(Adw.ApplicationWindow):
             self._fill_hero()
 
     # -- provider ----------------------------------------------------------
+    #: One glyph each, so the list reads at a glance the way the shell's
+    #: device lists do. Claude's is the sun for its starburst mark.
+    PROVIDER_ICONS = {
+        OLLAMA: "computer-symbolic",
+        OPENAI: "network-server-symbolic",
+        CODEX: "chat-symbolic",
+        CLAUDECODE: "weather-clear-symbolic",
+        OPENROUTER: "weather-overcast-symbolic",
+    }
+
     def _build_provider_group(self) -> None:
-        group = Adw.PreferencesGroup(title="Where edits run")
+        group = Adw.PreferencesGroup(title="WHERE EDITS RUN")
         self.page.add(group)
 
         self.provider_order = [OLLAMA, OPENAI, CODEX, CLAUDECODE, OPENROUTER]
@@ -619,8 +649,8 @@ class SettingsWindow(Adw.ApplicationWindow):
              "Claude Code — uses your plan, not API tokens", ""),
             (OPENROUTER, "OpenRouter", "Cloud, with a free tier", ""),
         ]
-        self._radio_picker(group, options, self._provider_id,
-                           self._on_provider_picked)
+        self._choice_rows(group, options, self._provider_id,
+                          self._on_provider_picked, icons=self.PROVIDER_ICONS)
 
         # These report state; they are not settings. Adding a non-row widget to
         # a PreferencesGroup places it below the card, which is exactly the
@@ -773,12 +803,13 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.privacy_icon.set_from_icon_name(
             "security-high-symbolic" if tone == "success"
             else "dialog-warning-symbolic")
+        self._refresh_brand_status()
         self._refresh_status()
 
     # -- openrouter --------------------------------------------------------
     def _build_openrouter_group(self) -> None:
         self.openrouter_group = Adw.PreferencesGroup(
-            title="OpenRouter",
+            title="OPENROUTER",
             description="Sign in with your OpenRouter account, or paste an API key.",
         )
         self.page.add(self.openrouter_group)
@@ -801,6 +832,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.key_row = Adw.PasswordEntryRow(title="…or paste an API key")
         apply_key = Gtk.Button(label="Save key")
         apply_key.set_valign(Gtk.Align.CENTER)
+        apply_key.add_css_class("quill-outline")
         apply_key.connect("clicked", lambda *_: self._save_pasted_key())
         self.key_row.add_suffix(apply_key)
         self.openrouter_group.add(self.key_row)
@@ -895,11 +927,8 @@ class SettingsWindow(Adw.ApplicationWindow):
     # -- openai-compatible -------------------------------------------------
     def _build_openai_group(self) -> None:
         self.openai_group = Adw.PreferencesGroup(
-            title="OpenAI-compatible server",
-            description=("LM Studio, llama.cpp, vLLM, LocalAI — or api.openai.com. "
-                         "If you are pointing this at Ollama, prefer the Ollama "
-                         "provider instead: this API has no way to switch off "
-                         "reasoning, which makes short edits much slower."),
+            title="OPENAI-COMPATIBLE SERVER",
+            description="LM Studio, llama.cpp, vLLM, LocalAI — or api.openai.com.",
         )
         self.page.add(self.openai_group)
 
@@ -921,12 +950,14 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.openai_key_row = Adw.PasswordEntryRow(title="API key")
         save_key = Gtk.Button(label="Save key")
         save_key.set_valign(Gtk.Align.CENTER)
+        save_key.add_css_class("quill-outline")
         save_key.connect("clicked", lambda *_: self._save_openai_key())
         self.openai_key_row.add_suffix(save_key)
         self.openai_group.add(self.openai_key_row)
 
         fetch = Gtk.Button(label="List models")
         fetch.set_valign(Gtk.Align.CENTER)
+        fetch.add_css_class("quill-outline")
         fetch.connect("clicked", lambda *_: self._list_openai_models())
         self.openai_models_row = Adw.ActionRow()
         self.openai_models_row.set_use_markup(False)
@@ -934,6 +965,11 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.openai_models_row.set_subtitle("Not checked yet")
         self.openai_models_row.add_suffix(fetch)
         self.openai_group.add(self.openai_models_row)
+
+        self.openai_group.add(self._caption_line(
+            "Pointing this at Ollama works, but prefer the Ollama provider: "
+            "this API has no way to switch reasoning off, which makes short "
+            "edits much slower."))
 
         self._sync_openai_key_row()
 
@@ -998,11 +1034,24 @@ class SettingsWindow(Adw.ApplicationWindow):
         box.append(label)
         return box
 
-    def _radio_picker(self, group, options, current, on_pick):
-        """Always-visible radio rows. Same control as the model list."""
-        first: Gtk.CheckButton | None = None
-        radios: dict[str, Gtk.CheckButton] = {}
+    def _choice_rows(self, group, options, current, on_pick, icons=None):
+        """A list of choices with no radio circles.
+
+        None of the shell's panels draws a radio. The chosen network, the
+        connected device, the active output: each is marked by filling its
+        row and colouring the label, and the rest are plain. Carrying both a
+        radio and a fill would say the same thing twice.
+        """
+        rows: dict[str, Adw.ActionRow] = {}
         self._badges: dict[str, Gtk.Label] = getattr(self, "_badges", {})
+
+        def mark(value: str) -> None:
+            for key, row in rows.items():
+                if key == value:
+                    row.add_css_class("quill-current")
+                else:
+                    row.remove_css_class("quill-current")
+
         for option in options:
             value, title, subtitle = option[0], option[1], option[2]
             badge_text = option[3] if len(option) > 3 else None
@@ -1011,34 +1060,72 @@ class SettingsWindow(Adw.ApplicationWindow):
             row.set_title(title)
             if subtitle:
                 row.set_subtitle(subtitle)
+            if icons and icons.get(value):
+                image = Gtk.Image.new_from_icon_name(icons[value])
+                image.set_valign(Gtk.Align.CENTER)
+                row.add_prefix(image)
             if badge_text is not None:
                 badge = Gtk.Label(label="")
                 badge.set_valign(Gtk.Align.CENTER)
                 badge.add_css_class("quill-badge")
                 row.add_suffix(badge)
                 self._badges[value] = badge
-            radio = Gtk.CheckButton()
-            radio.set_valign(Gtk.Align.CENTER)
-            if first is None:
-                first = radio
-            else:
-                radio.set_group(first)
-            radio.set_active(value == current)
-            radio.connect("toggled",
-                          lambda r, v=value: on_pick(v) if r.get_active() else None)
-            row.add_prefix(radio)
-            row.set_activatable_widget(radio)
+            row.set_activatable(True)
+            row.connect("activated",
+                        lambda _r, v=value: (mark(v), on_pick(v)))
             group.add(row)
-            radios[value] = radio
-        return radios
+            rows[value] = row
+
+        mark(current)
+        return rows
+
+    def _segmented(self, group, options, current, on_pick, note: str = ""):
+        """Outlined buttons in a row, one of them filled.
+
+        The shell's shape for a short exclusive choice -- DNS PROVIDER is
+        four of these, the Claude panel's account switcher is two. Anything
+        that needs a sentence of explanation per option stays a row; this is
+        for choices whose labels are the whole story.
+        """
+        holder = Adw.PreferencesRow()
+        holder.set_activatable(False)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_margin_start(4)
+        box.set_margin_end(4)
+        box.set_margin_top(6)
+        box.set_margin_bottom(6)
+
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        buttons.add_css_class("quill-segment")
+        buttons.set_homogeneous(True)
+        first: Gtk.ToggleButton | None = None
+        for value, label in options:
+            button = Gtk.ToggleButton(label=label)
+            if first is None:
+                first = button
+            else:
+                button.set_group(first)
+            button.set_active(value == current)
+            button.connect("toggled",
+                           lambda b, v=value: on_pick(v) if b.get_active() else None)
+            buttons.append(button)
+        box.append(buttons)
+
+        if note:
+            caption = Gtk.Label(label=note, xalign=0, wrap=True)
+            caption.add_css_class("caption")
+            caption.add_css_class("dim-label")
+            box.append(caption)
+
+        holder.set_child(box)
+        group.add(holder)
+        return holder
 
     # -- claude code -------------------------------------------------------
     def _build_claude_group(self) -> None:
         self.claude_group = Adw.PreferencesGroup(
-            title="Claude subscription",
-            description=("Runs edits through Anthropic's Claude Code CLI, signed "
-                         "in with your Claude account. That uses your plan "
-                         "instead of metered API tokens."),
+            title="CLAUDE SUBSCRIPTION",
+            description="Your Claude plan, through the Claude Code CLI — not API tokens.",
         )
         self.page.add(self.claude_group)
 
@@ -1047,6 +1134,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.claude_status_row.set_title("Claude Code")
         self.claude_signin = Gtk.Button(label="Sign in")
         self.claude_signin.set_valign(Gtk.Align.CENTER)
+        self.claude_signin.add_css_class("quill-outline")
         self.claude_signin.connect("clicked", lambda *_: self._claude_login())
         self.claude_status_row.add_suffix(self.claude_signin)
         self.claude_group.add(self.claude_status_row)
@@ -1057,12 +1145,13 @@ class SettingsWindow(Adw.ApplicationWindow):
             self._claude_model = value
             self._refresh_status()
 
-        self._radio_picker(
+        self._segmented(
             self.claude_group,
-            [(m, claudecode.MODEL_LABELS.get(m, m),
-              "Recommended — quickest to come back" if m == claudecode.DEFAULT_MODEL else "")
+            [(m, claudecode.MODEL_LABELS.get(m, m).split("—")[0].strip())
              for m in claudecode.MODELS],
-            self._claude_model, pick)
+            self._claude_model, pick,
+            note=f"{claudecode.MODEL_LABELS.get(claudecode.DEFAULT_MODEL, '')} "
+                 f"is the quickest to come back, which is what an edit wants.")
         self._sync_claude_row()
 
     def _sync_claude_row(self) -> None:
@@ -1082,12 +1171,8 @@ class SettingsWindow(Adw.ApplicationWindow):
     # -- codex -------------------------------------------------------------
     def _build_codex_group(self) -> None:
         self.codex_group = Adw.PreferencesGroup(
-            title="ChatGPT subscription",
-            description=(
-                "Runs edits through OpenAI's own Codex CLI, signed in with your "
-                "ChatGPT account. That bills against your plan instead of "
-                "metered API tokens."
-            ),
+            title="CHATGPT SUBSCRIPTION",
+            description="Your ChatGPT plan, through OpenAI's Codex CLI — not API tokens.",
         )
         self.page.add(self.codex_group)
 
@@ -1096,6 +1181,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.codex_status_row.set_title("Codex CLI")
         self.codex_signin = Gtk.Button(label="Sign in")
         self.codex_signin.set_valign(Gtk.Align.CENTER)
+        self.codex_signin.add_css_class("quill-outline")
         self.codex_signin.connect("clicked", lambda *_: self._codex_login())
         self.codex_status_row.add_suffix(self.codex_signin)
         self.codex_group.add(self.codex_status_row)
@@ -1106,19 +1192,19 @@ class SettingsWindow(Adw.ApplicationWindow):
             self._codex_model = value
             self._refresh_status()
 
-        self._radio_picker(
+        self._segmented(
             self.codex_group,
-            [(m, codex.MODEL_LABELS.get(m, m),
-              "Recommended — measured 3.7s against 4.4s for Sol"
-              if m == codex.DEFAULT_MODEL else "")
+            [(m, codex.MODEL_LABELS.get(m, m).split("—")[0].strip())
              for m in codex.MODELS],
-            self._codex_model, pick_model)
+            self._codex_model, pick_model,
+            note="Measured over three runs: Luna came back in 3.7s "
+                 "against 4.4s for Sol.")
 
         # A heading of its own. Stacked in one card, the model radios and the
         # effort radios were six identical rows with no telling where one
         # question ended and the next began.
         self.codex_effort_group = Adw.PreferencesGroup(
-            title="How hard it thinks",
+            title="HOW HARD IT THINKS",
             description="Editing needs no deliberation; higher settings only cost time.",
         )
         self.page.add(self.codex_effort_group)
@@ -1129,10 +1215,9 @@ class SettingsWindow(Adw.ApplicationWindow):
             self._codex_effort = value
             self._refresh_status()
 
-        self._radio_picker(
+        self._segmented(
             self.codex_effort_group,
-            [(e, codex.EFFORT_LABELS.get(e, e),
-              "Recommended for editing" if e == "low" else "")
+            [(e, codex.EFFORT_LABELS.get(e, e).split("—")[0].strip())
              for e in codex.EFFORTS],
             self._codex_effort, pick_effort)
 
@@ -1172,7 +1257,7 @@ class SettingsWindow(Adw.ApplicationWindow):
     # an editing tool and the switch was only ever a foot-gun; it stays
     # hand-editable in config.toml for anyone who needs it.
     def _build_model_group(self) -> None:
-        group = Adw.PreferencesGroup(title="Local model")
+        group = Adw.PreferencesGroup(title="LOCAL MODEL")
         self.model_group = group
         self.page.add(group)
 
@@ -1180,8 +1265,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         # the label carries the reason to pick one, and a collapsed ComboRow
         # truncated that to "Best quality - Gemma ...".
         self.model_group_card = group
-        self.model_radio_group: Gtk.CheckButton | None = None
-        self.model_radios: dict[str, Gtk.CheckButton] = {}
+        self.model_rows: dict[str, Adw.ActionRow] = {}
         self.model_row_widgets: list[Adw.ActionRow] = []
         self.other_expander: Adw.ExpanderRow | None = None
         self._downloads: dict[str, threading.Event] = {}
@@ -1266,8 +1350,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             self.model_group_card.remove(self.other_expander)
             self.other_expander = None
         self.model_row_widgets = []
-        self.model_radios = {}
-        self.model_radio_group = None
+        self.model_rows = {}
 
         def unsuited(model: str) -> bool:
             note = models.note_for(model)
@@ -1322,19 +1405,14 @@ class SettingsWindow(Adw.ApplicationWindow):
             return self._download_row(row, model)
 
         row.set_subtitle(models.describe(model))
-        radio = Gtk.CheckButton()
-        radio.set_valign(Gtk.Align.CENTER)
-        if self.model_radio_group is None:
-            self.model_radio_group = radio
-        else:
-            radio.set_group(self.model_radio_group)
-        radio.set_active(model == self._selected_id)
-        radio.connect("toggled", self._on_radio_toggled, model)
-
-        row.add_prefix(radio)
-        # Clicking anywhere on the row picks it, not just the small circle.
-        row.set_activatable_widget(radio)
-        self.model_radios[model] = radio
+        image = Gtk.Image.new_from_icon_name("computer-symbolic")
+        image.set_valign(Gtk.Align.CENTER)
+        row.add_prefix(image)
+        row.set_activatable(True)
+        row.connect("activated", lambda _r, m=model: self._on_model_picked(m))
+        if model == self._selected_id:
+            row.add_css_class("quill-current")
+        self.model_rows[model] = row
         return row
 
     def _download_row(self, row: Adw.ActionRow, model: str) -> Adw.ActionRow:
@@ -1352,7 +1430,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         button = Gtk.Button()
         button.set_child(Adw.ButtonContent(icon_name="folder-download-symbolic",
                                           label="Download"))
-        button.add_css_class("suggested-action")
+        button.add_css_class("quill-outline")
         button.set_valign(Gtk.Align.CENTER)
         button.connect("clicked", lambda _b: self._download_model(
             model, row, progress, button))
@@ -1405,15 +1483,20 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._reload_model_list()
         return False
 
-    def _on_radio_toggled(self, radio: Gtk.CheckButton, model: str) -> None:
-        if radio.get_active():
-            self._selected_id = model
-            self._on_model_changed()
+    def _on_model_picked(self, model: str) -> None:
+        self._selected_id = model
+        for name, row in self.model_rows.items():
+            if name == model:
+                row.add_css_class("quill-current")
+            else:
+                row.remove_css_class("quill-current")
+        self._on_model_changed()
 
     def _on_model_changed(self) -> None:
         """Each row carries its own stats; this is the longer explanation."""
         selected = self._selected_model()
         self.detail_label.set_label(models.detail(selected) or models.COMPARISON)
+        self._refresh_brand_status()
         self._refresh_status()
 
     def _sync_pull_row(self, installed: list[str]) -> None:
@@ -1467,7 +1550,7 @@ class SettingsWindow(Adw.ApplicationWindow):
 
     # -- behaviour ---------------------------------------------------------
     def _build_behaviour_group(self) -> None:
-        group = Adw.PreferencesGroup(title="Behaviour")
+        group = Adw.PreferencesGroup(title="BEHAVIOUR")
         self.page.add(group)
 
         self.auto_row = Adw.SwitchRow(
@@ -1503,7 +1586,7 @@ class SettingsWindow(Adw.ApplicationWindow):
     # -- actions -----------------------------------------------------------
     def _build_actions_group(self) -> None:
         self.actions_group = Adw.PreferencesGroup(
-            title="Edits and shortcuts",
+            title="EDITS AND SHORTCUTS",
             description=("What appears in the popup, in order. Give any edit its "
                          "own shortcut to run it without the popup."),
         )
@@ -1554,7 +1637,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             change = Gtk.Button()
             change.set_child(Adw.ButtonContent(icon_name="document-edit-symbolic",
                                                label="Change"))
-            change.add_css_class("flat")
+            change.add_css_class("quill-outline")
             change.set_valign(Gtk.Align.CENTER)
             change.connect("clicked", lambda _b, bind=binding: self._capture_chord(bind))
             row.add_suffix(change)
@@ -1572,7 +1655,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         assign = Gtk.Button()
         assign.set_child(Adw.ButtonContent(icon_name="list-add-symbolic",
                                            label="Add shortcut"))
-        assign.add_css_class("flat")
+        assign.add_css_class("quill-outline")
         assign.set_valign(Gtk.Align.CENTER)
         assign.connect("clicked",
                        lambda _b, aid=action_id_for_new: self._capture_new_chord(aid))

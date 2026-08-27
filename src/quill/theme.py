@@ -389,36 +389,146 @@ window, popover, .background {{
   font-family: {font};
 }}
 
-/* Omarchy's controls are outlined, not shadowed: one hairline at 40% of the
-   foreground, a 4% fill, and the same corner radius Hyprland is rounding the
-   window with. Cards keep their fill but lose Adwaita's drop shadow. */
-.card, .boxed-list, list.boxed-list {{
-  border: 1px solid alpha(@window_fg_color, 0.35);
-  border-radius: {radius}px;
+/* --- the shell's panel grammar ----------------------------------------
+   Every Omarchy panel -- bluetooth, network, audio, the menu -- is built the
+   same way, and none of it is Adwaita's way:
+
+     * no cards. Content sits on the panel background and sections are told
+       apart by a hairline rule, not by a box drawn around each one;
+     * sections are announced by a small tracked capital label, dimmed;
+     * rows are flat and transparent, with exactly one filled row per group
+       marking what is current, its label in the accent colour;
+     * hierarchy is carried by brightness. Almost nothing is bold, and
+       nothing is bold *and* large -- dimming does the work that weight and
+       boxes do in Adwaita;
+     * small exclusive choices are outlined buttons in a row, spaced apart,
+       with the chosen one filled.
+
+   These rules put that grammar over libadwaita's widgets. */
+
+list.boxed-list, .card {{
+  background: none;
+  border: none;
+  box-shadow: none;
+}}
+/* libadwaita separates boxed-list rows with a bottom border; the shell's
+   lists have none, and the spacing does the separating. */
+list.boxed-list > row,
+list.boxed-list > row:not(:last-child),
+row.expander list > row,
+row.expander list > row:not(:last-child) {{
+  border-bottom-width: 0;
   box-shadow: none;
 }}
 
+/* A section: hairline, then tracked capitals. */
+preferencesgroup > box > box.header {{
+  border-top: 1px solid alpha(@window_fg_color, 0.13);
+  padding-top: 20px;
+  margin-top: 12px;
+  margin-bottom: 2px;
+}}
+preferencesgroup.quill-plain > box > box.header {{
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}}
+preferencesgroup > box > box.header label.heading {{
+  font-size: 0.8em;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  opacity: 0.5;
+}}
+preferencesgroup > box > box.header label.body.dimmed {{
+  opacity: 0.45;
+  margin-top: 6px;
+}}
+
+/* Rows: flat, and only the current one is filled. */
 row {{
   background-color: transparent;
+  border-radius: {small}px;
 }}
 row.activatable:hover {{
-  background-color: alpha(@window_fg_color, 0.08);
+  background-color: alpha(@window_fg_color, 0.06);
 }}
 row.activatable:active {{
-  background-color: alpha(@window_fg_color, 0.22);
-}}
-row:selected {{
   background-color: alpha(@window_fg_color, 0.18);
+}}
+row.quill-current {{
+  background-color: alpha(@window_fg_color, 0.09);
+  box-shadow: inset 0 0 0 1px alpha(@window_fg_color, 0.20);
+}}
+row.quill-current > box.header > box.title > label.title {{
+  color: @accent_color;
+}}
+
+/* Outlined, spaced, one of them filled: the shell's segmented control. */
+.quill-segment button {{
+  background: none;
+  background-image: none;
+  border: 1px solid alpha(@window_fg_color, 0.28);
+  border-radius: {small}px;
+  padding: 7px 14px;
+  font-weight: 400;
+}}
+.quill-segment button:hover {{
+  background-color: alpha(@window_fg_color, 0.06);
+}}
+.quill-segment button:checked {{
+  background-color: alpha(@window_fg_color, 0.10);
+  border-color: alpha(@window_fg_color, 0.55);
+  color: @accent_color;
 }}
 
 button {{
   border-radius: {small}px;
+}}
+/* Actions inside a row are outlined, like the shell's segment buttons.
+   A bare bold word floating in a row reads as text, not as something to
+   press. */
+button.quill-outline {{
+  background: none;
+  background-image: none;
+  border: 1px solid alpha(@window_fg_color, 0.28);
+  padding: 6px 12px;
+  font-weight: 400;
+}}
+button.quill-outline:hover {{
+  background-color: alpha(@window_fg_color, 0.08);
+  border-color: alpha(@window_fg_color, 0.5);
 }}
 button.flat:hover {{
   background-color: alpha(@window_fg_color, 0.08);
 }}
 entry, spinbutton, textview {{
   border-radius: {small}px;
+}}
+progressbar > trough {{
+  min-height: 4px;
+  border-radius: 999px;
+  background-color: alpha(@window_fg_color, 0.14);
+}}
+progressbar > trough > progress {{
+  min-height: 4px;
+  border-radius: 999px;
+  background-color: @window_fg_color;
+}}
+
+/* The panel header: a big glyph, the name, and a tracked-capital line of
+   status under it -- "MAX 5X", "UNTANGLING WIRES", "WIRING BITS". */
+.quill-app-name {{
+  font-size: 1.55em;
+  font-weight: 400;
+}}
+.quill-app-status {{
+  font-size: 0.78em;
+  letter-spacing: 0.14em;
+  opacity: 0.5;
+}}
+.quill-rule {{
+  min-height: 1px;
+  background-color: alpha(@window_fg_color, 0.13);
 }}
 
 /* Status pills: state as a word, at the weight of a label. */
@@ -437,7 +547,9 @@ entry, spinbutton, textview {{
   padding: 20px 0 16px 0;
 }}
 .quill-tutorial {{
-  padding: 14px 16px 16px 16px;
+  padding: 16px 16px 18px 16px;
+  background-color: alpha(@window_fg_color, 0.045);
+  border-radius: {radius}px;
 }}
 
 /* Keycaps. A thick border-bottom renders as a flange outside the rounded
