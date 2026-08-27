@@ -106,11 +106,17 @@ def cmd_run(args, cfg: Config) -> int:
     if not _preflight(cfg):
         return 1
 
+    # Ask before starting: once the request is in flight this process is
+    # blocked, so there is no chance to update the toast mid-load.
+    cold = cfg.provider == config_mod.OLLAMA and not ollama.is_loaded(cfg)
+
     notice = None
     if not quiet:
+        body = (f"Warming up {provider.label(cfg)} — the first edit after a "
+                f"restart takes a while, later ones are instant"
+                if cold else f"Working… · {provider.label(cfg)}")
         notice = hypr.notify(
-            action.label,
-            f"Working… · {provider.label(cfg)}",
+            action.label, body,
             transient=True,
             # Long enough to outlive a slow backend; replaced below.
             timeout_ms=120000,
@@ -148,9 +154,12 @@ def cmd_run(args, cfg: Config) -> int:
         # Say what changed, not just that something did. With auto-replace on
         # this is the only record of the edit the user gets.
         elapsed = time.monotonic() - started
+        tail = provider.label(cfg)
+        if cold:
+            tail += " · that included loading the model; the next one is instant"
         hypr.notify(
             f"{action.label} · {elapsed:.1f}s",
-            f"{_ellipsis(result, 160)}\n\n{provider.label(cfg)}",
+            f"{_ellipsis(result, 160)}\n\n{tail}",
             replace_id=notice, transient=True, timeout_ms=6000,
         )
     else:

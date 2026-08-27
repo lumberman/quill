@@ -42,6 +42,26 @@ def installed_models(cfg: Config) -> list[str]:
     return [m.get("name", "") for m in data.get("models", []) if m.get("name")]
 
 
+def loaded_models(cfg: Config) -> list[str]:
+    """Models currently resident in VRAM, per /api/ps."""
+    data = _get_json(cfg.host.rstrip("/") + "/api/ps")
+    if not isinstance(data, dict):
+        return []
+    return [m.get("name", "") for m in data.get("models", []) if m.get("name")]
+
+
+def is_loaded(cfg: Config, model: str | None = None) -> bool:
+    """Whether the next request will skip loading weights.
+
+    A cold model can take 20s+ while a warm one answers in a fraction of a
+    second, which is worth telling the user before they conclude it hung.
+    """
+    target = model or cfg.model
+    names = loaded_models(cfg)
+    return any(n == target or n.split(":")[0] == target.split(":")[0]
+               for n in names)
+
+
 def has_model(cfg: Config, model: str | None = None) -> bool:
     """Ollama resolves a bare name to its :latest tag, so compare both ways."""
     target = model or cfg.model

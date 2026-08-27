@@ -39,6 +39,14 @@ CSS = """
   padding: 14px 16px 16px 16px;
 }
 /* Status lines that report rather than invite a click. */
+.quill-badge {
+  font-size: 0.74em;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background-color: alpha(currentColor, 0.13);
+  letter-spacing: 0.4px;
+}
 .quill-secondary {
   padding: 8px 4px 0 4px;
 }
@@ -157,6 +165,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._ready = True
         self._sync_account_row()
         self._sync_provider()
+        self._refresh_provider_badges()
 
 
 
@@ -589,11 +598,15 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._provider_id = (self.cfg.provider if self.cfg.provider in self.provider_order
                              else OLLAMA)
         options = [
-            (OLLAMA, "On this machine", "Ollama — nothing leaves this computer"),
-            (OPENAI, "OpenAI-compatible server", "LM Studio, llama.cpp, vLLM, or api.openai.com"),
-            (CODEX, "ChatGPT subscription", "Codex CLI — uses your plan, not API tokens"),
-            (CLAUDECODE, "Claude subscription", "Claude Code — uses your plan, not API tokens"),
-            (OPENROUTER, "OpenRouter", "Cloud, with a free tier"),
+            (OLLAMA, "On this machine",
+             "Ollama — nothing leaves this computer", ""),
+            (OPENAI, "OpenAI-compatible server",
+             "LM Studio, llama.cpp, vLLM, or api.openai.com", ""),
+            (CODEX, "ChatGPT subscription",
+             "Codex CLI — uses your plan, not API tokens", ""),
+            (CLAUDECODE, "Claude subscription",
+             "Claude Code — uses your plan, not API tokens", ""),
+            (OPENROUTER, "OpenRouter", "Cloud, with a free tier", ""),
         ]
         self._radio_picker(group, options, self._provider_id,
                            self._on_provider_picked)
@@ -638,9 +651,75 @@ class SettingsWindow(Adw.ApplicationWindow):
         group.add(secondary)
 
 
+    def _provider_state(self, value: str) -> tuple[str, str]:
+        """(badge, css class) for a provider row.
+
+        Deliberately avoids network calls: opening settings should not wait on
+        OpenRouter to answer. Presence of a key or a signed-in CLI is enough to
+        say "available"; whether it actually works is the Status line's job.
+        """
+        selected = self._provider_value()
+
+        if value == CODEX:
+            if not codex.available():
+                return "NOT INSTALLED", "dim-label"
+            mode = codex.auth_mode()
+            if mode is None:
+                return "NOT SIGNED IN", "warning"
+            if mode != "chatgpt":
+                return "API KEY — BILLED", "warning"
+            ready = True
+        elif value == CLAUDECODE:
+            if not claudecode.available():
+                return "NOT INSTALLED", "dim-label"
+            if not claudecode.signed_in():
+                return "NOT SIGNED IN", "warning"
+            ready = True
+        elif value == OLLAMA:
+            ready = ollama.is_up(self.cfg)
+            if not ready:
+                return "NOT RUNNING", "warning"
+        elif value == OPENROUTER:
+            if not openrouter.has_key():
+                return "NOT CONNECTED", "dim-label"
+            ready = True
+        else:
+            base = self._openai_base_url() if hasattr(self, "base_url_row") \
+                else self.cfg.openai_base_url
+            if openai_api.needs_key(base):
+                # Remote: do not stall the window on a round trip. A stored key
+                # is the most that can be claimed without asking the server.
+                if not openai_api.key():
+                    return "NEEDS A KEY", "dim-label"
+                ready = True
+            else:
+                # Loopback: a closed port refuses immediately, so this is cheap
+                # and stops the badge claiming AVAILABLE with nothing listening.
+                probe = replace(self.cfg, openai_base_url=base)
+                if not openai_api.is_up(probe):
+                    return "NOT RUNNING", "warning"
+                ready = True
+
+        if not ready:
+            return "", "dim-label"
+        # "Configured" is the one in use; "Available" is detected but idle.
+        return ("CONFIGURED", "success") if value == selected else ("AVAILABLE", "accent")
+
+    def _refresh_provider_badges(self) -> None:
+        for value, badge in getattr(self, "_badges", {}).items():
+            if value not in self.provider_order:
+                continue
+            text, tone = self._provider_state(value)
+            badge.set_label(text)
+            badge.set_visible(bool(text))
+            for css in ("success", "accent", "warning", "dim-label"):
+                badge.remove_css_class(css)
+            badge.add_css_class(tone)
+
     def _on_provider_picked(self, value: str) -> None:
         self._provider_id = value
         self._sync_provider()
+        self._refresh_provider_badges()
 
     def _provider_value(self) -> str:
         return getattr(self, "_provider_id", OLLAMA)
@@ -777,6 +856,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._sync_account_row()
         self._reload_openrouter_models()
         self._refresh_status()
+        self._refresh_provider_badges()
         return False
 
     def _sign_out(self) -> None:
@@ -892,12 +972,21 @@ class SettingsWindow(Adw.ApplicationWindow):
         """Always-visible radio rows. Same control as the model list."""
         first: Gtk.CheckButton | None = None
         radios: dict[str, Gtk.CheckButton] = {}
-        for value, title, subtitle in options:
+        self._badges: dict[str, Gtk.Label] = getattr(self, "_badges", {})
+        for option in options:
+            value, title, subtitle = option[0], option[1], option[2]
+            badge_text = option[3] if len(option) > 3 else None
             row = Adw.ActionRow()
             row.set_use_markup(False)
             row.set_title(title)
             if subtitle:
                 row.set_subtitle(subtitle)
+            if badge_text is not None:
+                badge = Gtk.Label(label="")
+                badge.set_valign(Gtk.Align.CENTER)
+                badge.add_css_class("quill-badge")
+                row.add_suffix(badge)
+                self._badges[value] = badge
             radio = Gtk.CheckButton()
             radio.set_valign(Gtk.Align.CENTER)
             if first is None:
@@ -1215,6 +1304,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._sync_codex_row()
         self._sync_claude_row()
         self._sync_openai_key_row()
+        self._refresh_provider_badges()
         self._refresh_status(reload_models=True)
 
     def _refresh_status(self, reload_models: bool = False) -> None:
