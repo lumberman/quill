@@ -154,7 +154,6 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._build_brand()
         self._build_hero()
         self._build_tutorial()
-        self._build_shortcuts_group()
         self._build_provider_group()
         self._build_openai_group()
         self._build_codex_group()
@@ -170,15 +169,6 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._refresh_provider_badges()
 
 
-
-    # -- shortcuts ---------------------------------------------------------
-    # In-app bindings are fixed, so they are listed literally; the Hyprland
-    # chords are read live, because the user may well have rebound them.
-    IN_APP_SHORTCUTS = [
-        ("Click / right-click the bar icon", "Settings / run an edit"),
-        ("1\u20139,  \u2191\u2193 then \u21b5", "Pick an edit in the menu"),
-        ("\u21b5 / Esc", "Replace the selection / close"),
-    ]
 
     @staticmethod
     def _keycaps(chord: str, large: bool = False) -> Gtk.Box:
@@ -511,37 +501,6 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._set_step_state(1, "todo")
         self._set_step_state(2, "todo")
         self.step3_box.set_visible(False)
-
-    def _build_shortcuts_group(self) -> None:
-        """Reference and editor. The chords come from bindings.lua itself."""
-        self.shortcuts_group = Adw.PreferencesGroup()
-        self.page.add(self.shortcuts_group)
-
-        self.shortcuts_expander = Adw.ExpanderRow(title="Keys inside the popup")
-        self.shortcuts_expander.set_use_markup(False)
-        self.shortcuts_expander.add_prefix(
-            Gtk.Image.new_from_icon_name("input-keyboard-symbolic"))
-        self.shortcuts_group.add(self.shortcuts_expander)
-
-        self.shortcut_rows: list[Adw.ActionRow] = []
-        self._fill_shortcut_rows()
-
-    def _fill_shortcut_rows(self) -> None:
-        """Only the in-app keys. The bindings live with the edits they run."""
-        for row in self.shortcut_rows:
-            self.shortcuts_expander.remove(row)
-        self.shortcut_rows = []
-        for chord, what in self.IN_APP_SHORTCUTS:
-            row = Adw.ActionRow()
-            row.set_use_markup(False)
-            row.set_title(what)
-            label = Gtk.Label(label=chord)
-            label.set_valign(Gtk.Align.CENTER)
-            label.add_css_class("monospace")
-            label.add_css_class("dim-label")
-            row.add_suffix(label)
-            self.shortcuts_expander.add_row(row)
-            self.shortcut_rows.append(row)
 
     def _capture_chord(self, binding, creating: bool = False) -> None:
         """Modal that waits for a real key press, then writes it out."""
