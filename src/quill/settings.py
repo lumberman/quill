@@ -195,7 +195,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                     plus.add_css_class("quill-plus-lg")
                 plus.set_valign(Gtk.Align.CENTER)
                 box.append(plus)
-            cap = Gtk.Label(label=part)
+            cap = Gtk.Label(label=keybindings.pretty_key(part))
             cap.add_css_class("quill-keycap")
             if large:
                 cap.add_css_class("quill-keycap-lg")
@@ -541,6 +541,9 @@ class SettingsWindow(Adw.ApplicationWindow):
 
     def _capture_chord(self, binding, creating: bool = False) -> None:
         """Modal that waits for a real key press, then writes it out."""
+        if keybindings.is_pointer(binding.chord):
+            self._pick_pointer_chord(binding, creating)
+            return
         dialog = Adw.AlertDialog(
             heading=("Shortcut for: " + binding.label) if creating
                     else f"Change: {binding.label}",
@@ -551,7 +554,8 @@ class SettingsWindow(Adw.ApplicationWindow):
 
         holder = {"chord": None}
         preview = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        current = Gtk.Label(label=binding.chord or "Press a combination")
+        current = Gtk.Label(
+            label=keybindings.pretty(binding.chord) or "Press a combination")
         current.add_css_class("title-4")
         note = Gtk.Label(label="", wrap=True)
         note.add_css_class("caption")
@@ -559,19 +563,13 @@ class SettingsWindow(Adw.ApplicationWindow):
         preview.append(note)
         dialog.set_extra_child(preview)
 
-        def on_key(_c, keyval, _code, state):
-            from gi.repository import Gdk
-            if (Gdk.keyval_name(keyval) or "") == "Escape":
-                dialog.close()
-                return True
-            chord = keybindings.chord_from_event(keyval, state)
-            if chord is None:
-                return True            # still holding modifiers
+        def accept(chord: str) -> None:
+            shown = keybindings.pretty(chord)
             clash = keybindings.is_bound_elsewhere(chord, binding)
-            current.set_label(chord)
+            current.set_label(shown)
             if clash:
                 holder["chord"] = None
-                note.set_label(f"{chord} is already used by “{clash}”. Try another.")
+                note.set_label(f"{shown} is already used by “{clash}”. Try another.")
                 note.remove_css_class("success")
                 note.add_css_class("error")
             else:
@@ -579,9 +577,23 @@ class SettingsWindow(Adw.ApplicationWindow):
                 note.set_label("Press Enter to keep it, or try another.")
                 note.remove_css_class("error")
                 note.add_css_class("success")
-            if (Gdk.keyval_name(keyval) or "") in ("Return", "KP_Enter") and holder["chord"]:
+
+        def on_key(_c, keyval, _code, state):
+            from gi.repository import Gdk
+            named = Gdk.keyval_name(keyval) or ""
+            if named == "Escape":
                 dialog.close()
-                self._apply_chord(binding, holder["chord"], creating)
+                return True
+            # Bare Enter confirms; Enter with a modifier held is a chord.
+            if named in ("Return", "KP_Enter") and not keybindings.has_modifiers(state):
+                if holder["chord"]:
+                    dialog.close()
+                    self._apply_chord(binding, holder["chord"], creating)
+                return True
+            chord = keybindings.chord_from_event(keyval, state)
+            if chord is None:
+                return True            # still holding modifiers
+            accept(chord)
             return True
 
         controller = Gtk.EventControllerKey()
@@ -589,6 +601,88 @@ class SettingsWindow(Adw.ApplicationWindow):
         controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         controller.connect("key-pressed", on_key)
         dialog.add_controller(controller)
+        dialog.present(self)
+
+    #: The mouse buttons worth binding, in the order they are offered.
+    POINTER_BUTTONS = ("mouse:272", "mouse:273", "mouse:274",
+                       "mouse:275", "mouse:276")
+
+    def _pick_pointer_chord(self, binding, creating: bool = False) -> None:
+        """Choose modifiers and a button, rather than capturing a click.
+
+        A pointer chord cannot be captured the way a key can: Hyprland grabs
+        SUPER+click for move and resize, and Quill's own trigger is a click
+        too, so the press is consumed before any dialog sees it. Picking is
+        the only method that works for every combination.
+        """
+        dialog = Adw.AlertDialog(
+            heading=("Shortcut for: " + binding.label) if creating
+                    else f"Change: {binding.label}",
+            body="Pick the modifiers and the button.",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("save", "Save")
+        dialog.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_close_response("cancel")
+        dialog.set_default_response("save")
+
+        parts = [p.strip() for p in binding.chord.split("+") if p.strip()]
+        held = {p.upper() for p in parts}
+        button = next((p.lower() for p in parts if p.lower().startswith("mouse")),
+                      "mouse:273")
+
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        shown = Gtk.Label()
+        shown.add_css_class("title-4")
+        note = Gtk.Label(label="", wrap=True)
+        note.add_css_class("caption")
+
+        mods_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        mods_box.add_css_class("linked")
+        mods_box.set_halign(Gtk.Align.CENTER)
+        toggles = {}
+        for mod in keybindings.MOD_ORDER:
+            toggle = Gtk.ToggleButton(label=mod.title())
+            toggle.set_active(mod in held)
+            toggles[mod] = toggle
+            mods_box.append(toggle)
+
+        labels = [keybindings.pretty_key(b) for b in self.POINTER_BUTTONS]
+        drop = Gtk.DropDown.new_from_strings(labels)
+        drop.set_selected(self.POINTER_BUTTONS.index(button)
+                          if button in self.POINTER_BUTTONS else 1)
+        drop.set_halign(Gtk.Align.CENTER)
+
+        body.append(shown)
+        body.append(mods_box)
+        body.append(drop)
+        body.append(note)
+        dialog.set_extra_child(body)
+
+        def chord() -> str:
+            mods = [m for m in keybindings.MOD_ORDER if toggles[m].get_active()]
+            return " + ".join(mods + [self.POINTER_BUTTONS[drop.get_selected()]])
+
+        def refresh(*_args) -> None:
+            value = chord()
+            shown.set_label(keybindings.pretty(value))
+            clash = keybindings.is_bound_elsewhere(value, binding)
+            note.set_label(f"Already used by \u201c{clash}\u201d." if clash else "")
+            note.remove_css_class("error")
+            if clash:
+                note.add_css_class("error")
+            dialog.set_response_enabled("save", not clash)
+
+        for toggle in toggles.values():
+            toggle.connect("toggled", refresh)
+        drop.connect("notify::selected", refresh)
+        refresh()
+
+        def on_response(_d, response: str) -> None:
+            if response == "save":
+                self._apply_chord(binding, chord(), creating)
+
+        dialog.connect("response", on_response)
         dialog.present(self)
 
     def _apply_chord(self, binding, chord: str, creating: bool = False) -> None:
@@ -601,7 +695,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             self._toast(str(exc))
             return
         if keybindings.reload():
-            self._toast(f"{binding.label} is now {chord}")
+            self._toast(f"{binding.label} is now {keybindings.pretty(chord)}")
         else:
             self._toast("Saved — run 'hyprctl reload' to apply")
         self._rebuild_action_rows()
@@ -1513,26 +1607,42 @@ class SettingsWindow(Adw.ApplicationWindow):
             if key:
                 self._binds_by_action.setdefault(key, binding)
 
-        for binding in self._binds:
-            if not keybindings.is_menu_trigger(binding):
-                continue
+        triggers = [b for b in self._binds if keybindings.is_menu_trigger(b)]
+        for binding in triggers:
             row = Adw.ActionRow()
             row.set_use_markup(False)
-            mouse = "mouse:" in binding.chord
+            mouse = keybindings.is_pointer(binding.chord)
             row.set_title("Open the popup")
             row.set_subtitle("From the pointer" if mouse
                              else "Choose any edit from the menu")
             row.add_prefix(Gtk.Image.new_from_icon_name(
                 "input-mouse-symbolic" if mouse else "view-list-symbolic"))
-            self._attach_chord_controls(row, binding, None)
+            # Quill needs one way in, so the last remaining trigger stays put.
+            self._attach_chord_controls(row, binding, None,
+                                       allow_clear=len(triggers) > 1)
+            self.actions_group.add(row)
+            self.trigger_rows.append(row)
+
+        if not any(keybindings.is_pointer(b.chord) for b in triggers):
+            row = Adw.ActionRow()
+            row.set_use_markup(False)
+            row.set_title("Open the popup")
+            row.set_subtitle("From the pointer")
+            row.add_prefix(Gtk.Image.new_from_icon_name("input-mouse-symbolic"))
+            self._attach_chord_controls(row, None, None,
+                                        on_add=self._capture_new_trigger)
             self.actions_group.add(row)
             self.trigger_rows.append(row)
 
         for index, action in enumerate(self.draft_actions):
             self.actions_group.add(self._action_row(index, action))
 
-    def _attach_chord_controls(self, row, binding, action_id_for_new) -> None:
+    def _attach_chord_controls(self, row, binding, action_id_for_new,
+                               allow_clear: bool | None = None,
+                               on_add=None) -> None:
         """Show the chord this row owns, with buttons to change or clear it."""
+        if allow_clear is None:
+            allow_clear = action_id_for_new is not None
         if binding is not None:
             keys = self._keycaps(binding.chord)
             keys.set_valign(Gtk.Align.CENTER)
@@ -1546,9 +1656,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             change.connect("clicked", lambda _b, bind=binding: self._capture_chord(bind))
             row.add_suffix(change)
 
-            # The popup trigger is the one shortcut Quill needs; the rest are
-            # extras, so only those can be cleared.
-            if action_id_for_new is not None:
+            if allow_clear:
                 clear = Gtk.Button(icon_name="edit-clear-symbolic")
                 clear.add_css_class("flat")
                 clear.set_valign(Gtk.Align.CENTER)
@@ -1563,9 +1671,18 @@ class SettingsWindow(Adw.ApplicationWindow):
                                            label="Add shortcut"))
         assign.add_css_class("flat")
         assign.set_valign(Gtk.Align.CENTER)
-        assign.connect("clicked",
-                       lambda _b, aid=action_id_for_new: self._capture_new_chord(aid))
+        assign.connect(
+            "clicked",
+            lambda _b, aid=action_id_for_new: (on_add() if on_add
+                                               else self._capture_new_chord(aid)))
         row.add_suffix(assign)
+
+    def _capture_new_trigger(self) -> None:
+        """Re-add a way to open the popup after one has been cleared."""
+        placeholder = keybindings.Binding(
+            chord="", description="Quill: Open the edit menu",
+            command=keybindings.quill_command("menu"), line=-1)
+        self._capture_chord(placeholder, creating=True)
 
     def _capture_new_chord(self, action_id: str) -> None:
         action = next((a for a in self.draft_actions if a.id == action_id), None)

@@ -18,7 +18,7 @@ MARK_START = "-- >>> quill >>>"
 MARK_END = "-- <<< quill <<<"
 
 # Hyprland's modifier names, in the order Omarchy writes them.
-_MOD_ORDER = ("SUPER", "CTRL", "ALT", "SHIFT")
+MOD_ORDER = ("SUPER", "CTRL", "ALT", "SHIFT")
 
 _BIND_RE = re.compile(
     r'^(?P<indent>\s*)o\.bind\(\s*"(?P<chord>[^"]+)"\s*,\s*'
@@ -159,8 +159,36 @@ def reload() -> bool:
         return False
 
 
-def chord_from_event(keyval: int, state) -> str | None:
-    """Turn a GTK key press into a Hyprland chord, or None if it is only mods."""
+# Hyprland names mouse buttons by their evdev code; nobody thinks in those.
+_MOUSE_LABELS = {
+    "mouse:272": "Left-click",
+    "mouse:273": "Right-click",
+    "mouse:274": "Middle-click",
+    "mouse:275": "Back button",
+    "mouse:276": "Forward button",
+    "mouse_up": "Wheel up",
+    "mouse_down": "Wheel down",
+}
+
+def pretty_key(part: str) -> str:
+    """A key name a human can read: "mouse:273" -> "Right-click"."""
+    return _MOUSE_LABELS.get(part.strip().lower(), part)
+
+
+def pretty(chord: str) -> str:
+    """A whole chord a human can read, keeping the "+" separators."""
+    return " + ".join(pretty_key(p.strip()) for p in chord.split("+") if p.strip())
+
+
+def is_pointer(chord: str) -> bool:
+    return "mouse" in chord.lower()
+
+
+def has_modifiers(state) -> bool:
+    return bool(_mods_from_state(state))
+
+
+def _mods_from_state(state) -> list[str]:
     from gi.repository import Gdk
 
     mods = []
@@ -172,7 +200,14 @@ def chord_from_event(keyval: int, state) -> str | None:
         mods.append("ALT")
     if state & Gdk.ModifierType.SHIFT_MASK:
         mods.append("SHIFT")
+    return [m for m in MOD_ORDER if m in mods]
 
+
+def chord_from_event(keyval: int, state) -> str | None:
+    """Turn a GTK key press into a Hyprland chord, or None if it is only mods."""
+    from gi.repository import Gdk
+
+    ordered = _mods_from_state(state)
     name = Gdk.keyval_name(keyval) or ""
     # A modifier on its own is not a chord yet; the user is still holding keys.
     if not name or name in (
@@ -182,7 +217,6 @@ def chord_from_event(keyval: int, state) -> str | None:
         return None
 
     key = name.upper() if len(name) == 1 else name
-    ordered = [m for m in _MOD_ORDER if m in mods]
     return " + ".join(ordered + [key])
 
 
@@ -193,6 +227,12 @@ def is_bound_elsewhere(chord: str, own: Binding) -> str | None:
     Omarchy's own defaults are caught too.
     """
     import json
+
+    def norm(text: str) -> str:
+        return " + ".join(p.strip().upper() for p in text.split("+") if p.strip())
+
+    if norm(chord) == norm(own.chord):
+        return None            # unchanged; it cannot clash with itself
 
     modmask = 0
     bits = {"SHIFT": 1, "CTRL": 4, "ALT": 8, "SUPER": 64}
@@ -214,7 +254,5 @@ def is_bound_elsewhere(chord: str, own: Binding) -> str | None:
         if str(entry.get("key") or "").lower() != key.lower():
             continue
         description = str(entry.get("description") or "")
-        if description == own.description:
-            continue        # that is this very binding
         return description or "another binding"
     return None
