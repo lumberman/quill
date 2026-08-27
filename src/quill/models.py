@@ -28,6 +28,7 @@ class ModelNote:
     memory: str
     accuracy: str
     detail: str
+    download: str = ""
 
     @property
     def choice_label(self) -> str:
@@ -59,6 +60,7 @@ NOTES: dict[str, ModelNote] = {
         speed="Feels instant (0.3s an edit)",
         memory="Needs 7.2 GB of graphics memory",
         accuracy="Got 13 of 14 test edits right",
+        download="7.2 GB",
         detail=(
             "The most accurate choice, and the one to pick if you write in "
             "Chinese or Russian. It gets names, capitalisation and accents "
@@ -73,6 +75,7 @@ NOTES: dict[str, ModelNote] = {
         speed="Feels instant (0.1s an edit)",
         memory="Needs only 2.1 GB of graphics memory",
         accuracy="Got 10 of 14 test edits right",
+        download="2.1 GB",
         detail=(
             "A third of the size, so it leaves your graphics card free for "
             "other things. In exchange it sometimes forgets to capitalise a "
@@ -100,6 +103,7 @@ for _model, _friendly, _speed, _memory in (
         memory=f"Needs {_memory}",
         accuracy="Got only 1 of 4 grammar tests right",
         detail=_TOO_SMALL,
+        download=_memory,
     )
 
 # Offered first in the dropdown, in this order.
@@ -155,3 +159,8 @@ def missing_recommendation(installed: list[str]) -> str | None:
         if model not in installed:
             return model
     return None
+
+
+def download_size(model: str) -> str:
+    note = NOTES.get(model)
+    return note.download if note and note.download else ""

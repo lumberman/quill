@@ -1165,9 +1165,10 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.model_radios: dict[str, Gtk.CheckButton] = {}
         self.model_row_widgets: list[Adw.ActionRow] = []
         self.other_expander: Adw.ExpanderRow | None = None
+        self._downloads: dict[str, threading.Event] = {}
 
-        # Shown when a model Quill has actually measured is not installed, with
-        # the one command needed to get it.
+        # Kept for the case where every recommended model is missing AND
+        # Ollama is unreachable, when a copyable command is all we can offer.
         self.pull_row = Adw.ActionRow()
         self.pull_row.set_use_markup(False)
         copy_pull = Gtk.Button(icon_name="edit-copy-symbolic")
@@ -1228,9 +1229,13 @@ class SettingsWindow(Adw.ApplicationWindow):
         if self.cfg.model not in installed:
             installed.append(self.cfg.model)
         self.model_ids = models.ordered(installed)
-        self._selected_id = (self.cfg.model if self.cfg.model in self.model_ids
-                             else (self.model_ids[0] if self.model_ids
-                                   else self.cfg.model))
+        # Keep a choice already made in this window; only fall back to the
+        # saved config when there is nothing to keep.
+        wanted = getattr(self, "_selected_id", None) or self.cfg.model
+        self._selected_id = (wanted if wanted in self.model_ids
+                             else (self.cfg.model if self.cfg.model in self.model_ids
+                                   else (self.model_ids[0] if self.model_ids
+                                         else self.cfg.model)))
 
         for row in self.model_row_widgets:
             self.model_group_card.remove(row)
@@ -1245,8 +1250,14 @@ class SettingsWindow(Adw.ApplicationWindow):
             note = models.note_for(model)
             return note is not None and note.tier == models.UNSUITED
 
+        # Quill ships no models, so the recommended ones are listed even when
+        # absent -- otherwise a fresh install shows an empty box and no way out.
         recommended = [m for m in self.model_ids if not unsuited(m)]
+        for model in models.RECOMMENDED:
+            if model not in recommended:
+                recommended.append(model)
         others = [m for m in self.model_ids if unsuited(m)]
+        self._installed = set(installed)
 
         for model in recommended:
             row = self._model_row(model)
@@ -1267,7 +1278,6 @@ class SettingsWindow(Adw.ApplicationWindow):
                 if model == self._selected_id:
                     self.other_expander.set_expanded(True)
             self.model_group_card.add(self.other_expander)
-            self.model_row_widgets.append(self.other_expander)
 
         self._on_model_changed()
         self._sync_pull_row(installed)
@@ -1276,8 +1286,11 @@ class SettingsWindow(Adw.ApplicationWindow):
         row = Adw.ActionRow()
         row.set_use_markup(False)
         row.set_title(models.label_for(model))
-        row.set_subtitle(models.describe(model))
 
+        if model not in getattr(self, "_installed", set()):
+            return self._download_row(row, model)
+
+        row.set_subtitle(models.describe(model))
         radio = Gtk.CheckButton()
         radio.set_valign(Gtk.Align.CENTER)
         if self.model_radio_group is None:
@@ -1293,6 +1306,74 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.model_radios[model] = radio
         return row
 
+    def _download_row(self, row: Adw.ActionRow, model: str) -> Adw.ActionRow:
+        """A model that is not on disk yet: offer to fetch it."""
+        size = models.download_size(model)
+        row.set_subtitle(f"Not downloaded · {size} to fetch" if size
+                         else "Not downloaded")
+
+        progress = Gtk.ProgressBar()
+        progress.set_valign(Gtk.Align.CENTER)
+        progress.set_size_request(120, -1)
+        progress.set_visible(False)
+        row.add_suffix(progress)
+
+        button = Gtk.Button()
+        button.set_child(Adw.ButtonContent(icon_name="folder-download-symbolic",
+                                          label="Download"))
+        button.add_css_class("suggested-action")
+        button.set_valign(Gtk.Align.CENTER)
+        button.connect("clicked", lambda _b: self._download_model(
+            model, row, progress, button))
+        row.add_suffix(button)
+        return row
+
+    def _download_model(self, model: str, row, progress, button) -> None:
+        if not ollama.is_up(self.cfg):
+            self._toast("Ollama is not running — start it first")
+            return
+        button.set_sensitive(False)
+        progress.set_visible(True)
+        progress.set_fraction(0.0)
+        row.set_subtitle("Starting…")
+        cancel = threading.Event()
+        self._downloads[model] = cancel
+
+        def worker():
+            try:
+                ollama.pull(self.cfg, model,
+                            on_progress=lambda status, fraction: GLib.idle_add(
+                                self._download_progress, row, progress,
+                                status, fraction),
+                            cancel=cancel)
+                GLib.idle_add(self._download_done, model, None)
+            except ollama.OllamaError as exc:
+                GLib.idle_add(self._download_done, model, str(exc))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _download_progress(self, row, progress, status: str,
+                           fraction: float | None) -> bool:
+        if fraction is None:
+            # Ollama is doing something it cannot size, e.g. verifying a digest.
+            progress.pulse()
+            row.set_subtitle(status or "Working…")
+        else:
+            progress.set_fraction(fraction)
+            row.set_subtitle(f"{status} — {fraction * 100:.0f}%")
+        return False
+
+    def _download_done(self, model: str, error: str | None) -> bool:
+        self._downloads.pop(model, None)
+        if error:
+            self._toast(error)
+        else:
+            self._toast(f"{models.friendly_name(model)} is ready")
+            # Select what was just fetched: it is what the user wanted.
+            self._selected_id = model
+        self._reload_model_list()
+        return False
+
     def _on_radio_toggled(self, radio: Gtk.CheckButton, model: str) -> None:
         if radio.get_active():
             self._selected_id = model
@@ -1306,6 +1387,10 @@ class SettingsWindow(Adw.ApplicationWindow):
 
     def _sync_pull_row(self, installed: list[str]) -> None:
         missing = models.missing_recommendation(installed)
+        if missing and ollama.is_up(self.cfg):
+            # The row above can fetch it; no need for a command to copy.
+            self.pull_row.set_visible(False)
+            return
         if not missing:
             self.pull_row.set_visible(False)
             return

@@ -108,6 +108,63 @@ def _stream_response(
                 return
 
 
+def pull(cfg: Config, model: str, on_progress=None,
+         cancel: threading.Event | None = None) -> None:
+    """Download a model, reporting progress. Raises OllamaError on failure.
+
+    on_progress(status, fraction) is called as it goes; fraction is None while
+    Ollama is doing work it cannot size, such as verifying a digest.
+    """
+    payload = {"model": model, "stream": True}
+    req = urllib.request.Request(
+        cfg.host.rstrip("/") + "/api/pull",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        # No total timeout: a multi-gigabyte pull legitimately takes minutes,
+        # and the per-read timeout still catches a stalled connection.
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            for raw in resp:
+                if cancel is not None and cancel.is_set():
+                    return
+                line = raw.decode("utf-8", errors="replace").strip()
+                if not line:
+                    continue
+                try:
+                    chunk = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if chunk.get("error"):
+                    raise OllamaError(str(chunk["error"]))
+                status = str(chunk.get("status") or "")
+                total = chunk.get("total") or 0
+                done = chunk.get("completed") or 0
+                fraction = (done / total) if total else None
+                if on_progress is not None:
+                    on_progress(status, fraction)
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:300]
+        raise OllamaError(f"Could not download {model}: HTTP {exc.code} {detail}") from exc
+    except (urllib.error.URLError, OSError, TimeoutError) as exc:
+        raise OllamaError(f"Could not download {model}: {exc}") from exc
+
+
+def remove(cfg: Config, model: str) -> None:
+    """Delete a downloaded model."""
+    req = urllib.request.Request(
+        cfg.host.rstrip("/") + "/api/delete",
+        data=json.dumps({"model": model}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="DELETE",
+    )
+    try:
+        urllib.request.urlopen(req, timeout=30).read()
+    except (urllib.error.URLError, OSError, TimeoutError) as exc:
+        raise OllamaError(f"Could not remove {model}: {exc}") from exc
+
+
 def stream_chat(
     cfg: Config,
     messages: list[dict],

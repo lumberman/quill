@@ -2,7 +2,7 @@
 # Quill installer for Omarchy.
 #
 #   ./install.sh                 full install
-#   ./install.sh --no-model      skip the (large) model download
+#   ./install.sh --with-model    also download the default model now
 #   ./install.sh --no-keybind    do not touch ~/.config/hypr/bindings.lua
 #   ./install.sh --no-bar-icon   do not add the icon to the Omarchy bar
 set -euo pipefail
@@ -15,12 +15,12 @@ HYPRLAND_LUA="$HOME/.config/hypr/hyprland.lua"
 MARK_START="-- >>> quill >>>"
 MARK_END="-- <<< quill <<<"
 
-DO_MODEL=1
+DO_MODEL=0
 DO_KEYBIND=1
 DO_BAR=1
 for arg in "$@"; do
   case "$arg" in
-    --no-model)   DO_MODEL=0 ;;
+    --with-model) DO_MODEL=1 ;;
     --no-keybind) DO_KEYBIND=0 ;;
     --no-bar-icon) DO_BAR=0 ;;
     -h|--help)    sed -n '2,8p' "$0"; exit 0 ;;
@@ -124,7 +124,10 @@ if ((DO_MODEL)); then
     ollama pull "$MODEL"
   fi
 else
-  say "Skipping model download (--no-model)"
+  # Quill ships no models. Which one to use is a real choice with real
+  # trade-offs, so it belongs in settings where those are explained, not in an
+  # installer that picks for you.
+  say "No model downloaded — choose one in Quill's settings"
 fi
 
 # --- 4. link the command ---------------------------------------------------

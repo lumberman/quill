@@ -62,7 +62,7 @@ The installer will ask for your sudo password (to install Ollama), then:
 1. installs the right Ollama package for your GPU — the same NVIDIA/AMD
    detection Omarchy's own *Install → AI → Ollama* menu entry uses,
 2. enables and starts the `ollama` service,
-3. pulls the model (several GB — this is the slow step),
+3. does *not* download a model — you pick one in settings, which explains the trade-offs,
 4. links `quill` into `~/.local/bin`,
 5. writes `~/.config/quill/config.toml`,
 6. appends the keybindings to `~/.config/hypr/bindings.lua`, backing the file up
@@ -70,7 +70,8 @@ The installer will ask for your sudo password (to install Ollama), then:
 7. installs the bar icon as an Omarchy shell plugin and adds it to your bar,
 8. adds a window rule so the settings window floats instead of tiling.
 
-It is safe to re-run. Useful flags: `--no-model`, `--no-keybind`, `--no-bar-icon`.
+It is safe to re-run. Useful flags: `--with-model` (download the default model
+during install), `--no-keybind`, `--no-bar-icon`.
 
 Check the result at any time:
 
@@ -265,7 +266,9 @@ Two environment variables exist for testing and self-hosted proxies:
 
 ## Models
 
-Settings lists the models you have pulled as radio rows — always visible, each
+Quill ships no models. Settings lists the recommended ones whether or not they
+are on disk, each with a **Download** button and a progress bar, so the first
+run has somewhere to go. Installed models appear as radio rows — always visible, each
 one saying in plain language what picking it costs you. Models Quill measured
 and rejected are folded into an "Other models you have installed" group so they
 are still reachable without sitting beside the answers. The numbers come from
