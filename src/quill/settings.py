@@ -453,13 +453,16 @@ class SettingsWindow(Adw.ApplicationWindow):
         # These report state; they are not settings. Adding a non-row widget to
         # a PreferencesGroup places it below the card, which is exactly the
         # "secondary" weight they should carry.
-        secondary = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        secondary = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
         secondary.add_css_class("quill-secondary")
 
-        status_line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+        status_line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        status_line.set_hexpand(True)
         self.status_icon = Gtk.Image.new_from_icon_name("emblem-ok-symbolic")
-        self.status_icon.set_valign(Gtk.Align.START)
+        # CENTER, not START: the icon should sit on the text's optical centre.
+        self.status_icon.set_valign(Gtk.Align.CENTER)
         self.status_label = Gtk.Label(xalign=0, wrap=True)
+        self.status_label.set_valign(Gtk.Align.CENTER)
         self.status_label.add_css_class("caption")
         self.status_label.set_hexpand(True)
         refresh = Gtk.Button(icon_name="view-refresh-symbolic")
@@ -469,21 +472,21 @@ class SettingsWindow(Adw.ApplicationWindow):
         refresh.connect("clicked", lambda *_: self._refresh_all())
         status_line.append(self.status_icon)
         status_line.append(self.status_label)
-        status_line.append(refresh)
         secondary.append(status_line)
 
-        privacy_line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
-        privacy_icon = Gtk.Image.new_from_icon_name("security-high-symbolic")
-        privacy_icon.set_valign(Gtk.Align.START)
-        privacy_icon.add_css_class("dim-label")
+        privacy_line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        privacy_line.set_hexpand(True)
+        self.privacy_icon = Gtk.Image.new_from_icon_name("security-high-symbolic")
+        self.privacy_icon.set_valign(Gtk.Align.CENTER)
         self.privacy_label = Gtk.Label(xalign=0, wrap=True)
+        self.privacy_label.set_valign(Gtk.Align.CENTER)
         self.privacy_label.add_css_class("caption")
-        self.privacy_label.add_css_class("dim-label")
         self.privacy_label.set_hexpand(True)
-        privacy_line.append(privacy_icon)
+        privacy_line.append(self.privacy_icon)
         privacy_line.append(self.privacy_label)
         secondary.append(privacy_line)
 
+        secondary.append(refresh)
         group.add(secondary)
 
 
@@ -507,17 +510,24 @@ class SettingsWindow(Adw.ApplicationWindow):
 
         probe = replace(self.cfg, provider=active,
                         openai_base_url=self._openai_base_url())
+        # Short enough to sit beside the status line, and honest about the one
+        # thing that actually matters: whether the text leaves the machine.
         if probe.is_local:
-            note = "Nothing leaves this machine."
+            note, tone = "Nothing leaves this machine", "success"
         elif active == CODEX:
-            note = ("Selected text is sent to OpenAI through the Codex CLI, "
-                    "using your ChatGPT subscription rather than metered tokens.")
+            note, tone = "Sent to OpenAI on your ChatGPT plan", "warning"
         elif active == OPENROUTER:
-            note = ("Selected text is sent to OpenRouter and to whichever "
-                    "provider serves the model. Free models are often trained on.")
+            note, tone = "Sent to OpenRouter — free models may train on it", "warning"
         else:
-            note = f"Selected text is sent to {self._openai_base_url()}."
+            note, tone = f"Sent to {self._openai_base_url()}", "warning"
         self.privacy_label.set_label(note)
+        for widget in (self.privacy_icon, self.privacy_label):
+            for css in ("success", "warning", "dim-label"):
+                widget.remove_css_class(css)
+            widget.add_css_class(tone)
+        self.privacy_icon.set_from_icon_name(
+            "security-high-symbolic" if tone == "success"
+            else "dialog-warning-symbolic")
         self._refresh_status()
 
     # -- openrouter --------------------------------------------------------
@@ -965,18 +975,13 @@ class SettingsWindow(Adw.ApplicationWindow):
         probe = self._collect()
         usable, reason = provider.ready(probe)
         self.status_label.set_label(reason)
-        if usable:
-            self.status_label.remove_css_class("error")
-            self.status_label.add_css_class("dim-label")
-            self.status_icon.remove_css_class("error")
-            self.status_icon.add_css_class("dim-label")
-            self.status_icon.set_from_icon_name("emblem-ok-symbolic")
-        else:
-            self.status_label.remove_css_class("dim-label")
-            self.status_label.add_css_class("error")
-            self.status_icon.remove_css_class("dim-label")
-            self.status_icon.add_css_class("error")
-            self.status_icon.set_from_icon_name("dialog-warning-symbolic")
+        tone = "success" if usable else "error"
+        for widget in (self.status_icon, self.status_label):
+            for css in ("success", "error", "dim-label"):
+                widget.remove_css_class(css)
+            widget.add_css_class(tone)
+        self.status_icon.set_from_icon_name(
+            "emblem-ok-symbolic" if usable else "dialog-warning-symbolic")
 
     def _selected_model(self) -> str:
         return getattr(self, "_selected_id", self.cfg.model)
