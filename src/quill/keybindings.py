@@ -98,6 +98,58 @@ def set_chord(binding: Binding, chord: str, path: Path | None = None) -> None:
     tmp.replace(path)
 
 
+def quill_command(argument: str) -> str:
+    """The command a bind should run, using the installed launcher."""
+    launcher = Path.home() / ".local" / "bin" / "quill"
+    exe = str(launcher) if launcher.exists() else "quill"
+    return f"{exe} {argument}"
+
+
+def action_id(binding: Binding) -> str | None:
+    """The edit a binding runs, for `quill run <id>` binds."""
+    match = re.search(r"\brun\s+([\w.-]+)\s*$", binding.command)
+    return match.group(1) if match else None
+
+
+def is_menu_trigger(binding: Binding) -> bool:
+    return binding.command.rstrip().endswith("menu")
+
+
+def add(chord: str, description: str, command: str,
+        path: Path | None = None) -> None:
+    """Append a bind inside Quill's block. Raises OSError on failure."""
+    path = path or bindings_path()
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    bounds = _block_bounds([line.rstrip("\n") for line in lines])
+    if bounds is None:
+        raise OSError("Quill's block is missing from bindings.lua — run ./install.sh")
+
+    shutil.copy(path, f"{path}.bak.{time.strftime('%Y%m%d-%H%M%S')}-before-quill-edit")
+    entry = f'o.bind("{chord}", "{description}", "{command}")\n'
+    lines.insert(bounds[1], entry)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text("".join(lines), encoding="utf-8")
+    tmp.replace(path)
+
+
+def remove(binding: Binding, path: Path | None = None) -> None:
+    """Delete one bind line. Raises OSError if the file moved underneath."""
+    path = path or bindings_path()
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    bounds = _block_bounds([line.rstrip("\n") for line in lines])
+    if bounds is None or not (bounds[0] < binding.line < bounds[1]):
+        raise OSError("that binding is no longer inside Quill's block")
+    match = _BIND_RE.match(lines[binding.line].rstrip("\n"))
+    if not match or match["chord"] != binding.chord:
+        raise OSError("bindings.lua changed since it was read; reopen settings")
+
+    shutil.copy(path, f"{path}.bak.{time.strftime('%Y%m%d-%H%M%S')}-before-quill-edit")
+    del lines[binding.line]
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text("".join(lines), encoding="utf-8")
+    tmp.replace(path)
+
+
 def reload() -> bool:
     try:
         out = subprocess.run(["hyprctl", "reload"], capture_output=True,

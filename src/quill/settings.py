@@ -440,20 +440,66 @@ class SettingsWindow(Adw.ApplicationWindow):
         if len(selected.strip()) < 4:
             return
         self.tutorial_before = selected
+        # Keep the whole buffer too, so the replacement can be isolated later.
+        self._buffer_before = buffer.get_text(*buffer.get_bounds(), False)
         self._set_step_state(1, "done")
 
     def _tutorial_changed(self) -> None:
-        """The buffer changing under the paste is what completes step three."""
+        """A replacement completes step three -- but only a real one.
+
+        Comparing the whole buffer against the selection meant every keystroke
+        in the field looked like a replacement, so typing a character produced
+        a "was/now" diff of the text against itself. The precise test is that
+        the fragment the user selected is no longer present.
+        """
         buffer = self.sample_view.get_buffer()
         current = buffer.get_text(*buffer.get_bounds(), False)
-        if current.strip() == self.SAMPLE.strip() or not current.strip():
+        if not current.strip() or not self.tutorial_before:
             return
-        if not self.tutorial_before or self.tutorial_before.strip() == current.strip():
+        selected = self.tutorial_before.strip()
+        if not selected or selected in current:
             return
         self._set_step_state(2, "done")
         self.step3_box.set_visible(True)
-        self.diff_before.set_label(f"was:  {self.tutorial_before.strip()}")
-        self.diff_after.set_label(f"now:  {current.strip()}")
+        was, now = self._changed_span(current)
+        self.diff_before.set_label(f"was:  {was}")
+        self.diff_after.set_label(f"now:  {now}")
+
+    def _changed_span(self, current: str) -> tuple[str, str]:
+        """(old, new) for the text that changed, snapped to word boundaries.
+
+        A character-level diff is minimal but unreadable: replacing
+        "recieved you're mesage" with "received your message" shares "rec" and
+        "ge", so the raw span reads "eived your mes". Widening to whitespace
+        keeps whole words on both sides.
+        """
+        before = getattr(self, "_buffer_before", "")
+        if not before:
+            return self.tutorial_before.strip(), current.strip()
+
+        start = 0
+        limit = min(len(before), len(current))
+        while start < limit and before[start] == current[start]:
+            start += 1
+        tail = 0
+        while (tail < len(before) - start and tail < len(current) - start
+               and before[-1 - tail] == current[-1 - tail]):
+            tail += 1
+
+        # Widen to whitespace so words are not cut in half.
+        while start > 0 and not before[start - 1].isspace():
+            start -= 1
+        def widen(text: str, end_offset: int) -> int:
+            index = len(text) - end_offset
+            while index < len(text) and not text[index].isspace():
+                index += 1
+            return len(text) - index
+        old_tail = widen(before, tail)
+        new_tail = widen(current, tail)
+
+        was = before[start:len(before) - old_tail].strip()
+        now = current[start:len(current) - new_tail].strip()
+        return (was or self.tutorial_before.strip(), now or current.strip())
 
     def _reset_tutorial(self) -> None:
         self.sample_view.get_buffer().set_text(self.SAMPLE)
@@ -467,7 +513,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.shortcuts_group = Adw.PreferencesGroup()
         self.page.add(self.shortcuts_group)
 
-        self.shortcuts_expander = Adw.ExpanderRow(title="Shortcuts")
+        self.shortcuts_expander = Adw.ExpanderRow(title="Keys inside the popup")
         self.shortcuts_expander.set_use_markup(False)
         self.shortcuts_expander.add_prefix(
             Gtk.Image.new_from_icon_name("input-keyboard-symbolic"))
@@ -477,37 +523,10 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._fill_shortcut_rows()
 
     def _fill_shortcut_rows(self) -> None:
+        """Only the in-app keys. The bindings live with the edits they run."""
         for row in self.shortcut_rows:
             self.shortcuts_expander.remove(row)
         self.shortcut_rows = []
-
-        editable = keybindings.read()
-        for binding in editable:
-            row = Adw.ActionRow()
-            row.set_use_markup(False)
-            row.set_title(binding.label)
-            keys = self._keycaps(binding.chord)
-            keys.set_valign(Gtk.Align.CENTER)
-            row.add_suffix(keys)
-            change = Gtk.Button()
-            change.set_child(Adw.ButtonContent(icon_name="document-edit-symbolic",
-                                               label="Change"))
-            change.add_css_class("flat")
-            change.set_valign(Gtk.Align.CENTER)
-            change.connect("clicked", lambda _b, bind=binding: self._capture_chord(bind))
-            row.add_suffix(change)
-            self.shortcuts_expander.add_row(row)
-            self.shortcut_rows.append(row)
-
-        if not editable:
-            row = Adw.ActionRow()
-            row.set_use_markup(False)
-            row.set_title("No Quill bindings found in bindings.lua")
-            row.set_subtitle("Run ./install.sh to add them")
-            self.shortcuts_expander.add_row(row)
-            self.shortcut_rows.append(row)
-
-        # The in-app keys are not bindings and cannot be changed here.
         for chord, what in self.IN_APP_SHORTCUTS:
             row = Adw.ActionRow()
             row.set_use_markup(False)
@@ -520,10 +539,11 @@ class SettingsWindow(Adw.ApplicationWindow):
             self.shortcuts_expander.add_row(row)
             self.shortcut_rows.append(row)
 
-    def _capture_chord(self, binding) -> None:
+    def _capture_chord(self, binding, creating: bool = False) -> None:
         """Modal that waits for a real key press, then writes it out."""
         dialog = Adw.AlertDialog(
-            heading=f"Change: {binding.label}",
+            heading=("Shortcut for: " + binding.label) if creating
+                    else f"Change: {binding.label}",
             body="Press the keys you want. Escape cancels.",
         )
         dialog.add_response("cancel", "Cancel")
@@ -531,7 +551,7 @@ class SettingsWindow(Adw.ApplicationWindow):
 
         holder = {"chord": None}
         preview = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        current = Gtk.Label(label=binding.chord)
+        current = Gtk.Label(label=binding.chord or "Press a combination")
         current.add_css_class("title-4")
         note = Gtk.Label(label="", wrap=True)
         note.add_css_class("caption")
@@ -561,7 +581,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                 note.add_css_class("success")
             if (Gdk.keyval_name(keyval) or "") in ("Return", "KP_Enter") and holder["chord"]:
                 dialog.close()
-                self._apply_chord(binding, holder["chord"])
+                self._apply_chord(binding, holder["chord"], creating)
             return True
 
         controller = Gtk.EventControllerKey()
@@ -571,9 +591,12 @@ class SettingsWindow(Adw.ApplicationWindow):
         dialog.add_controller(controller)
         dialog.present(self)
 
-    def _apply_chord(self, binding, chord: str) -> None:
+    def _apply_chord(self, binding, chord: str, creating: bool = False) -> None:
         try:
-            keybindings.set_chord(binding, chord)
+            if creating:
+                keybindings.add(chord, binding.description, binding.command)
+            else:
+                keybindings.set_chord(binding, chord)
         except OSError as exc:
             self._toast(str(exc))
             return
@@ -581,7 +604,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             self._toast(f"{binding.label} is now {chord}")
         else:
             self._toast("Saved — run 'hyprctl reload' to apply")
-        self._fill_shortcut_rows()
+        self._rebuild_action_rows()
         self._refresh_hero()
 
     def _refresh_hero(self) -> None:
@@ -1363,8 +1386,9 @@ class SettingsWindow(Adw.ApplicationWindow):
     # -- actions -----------------------------------------------------------
     def _build_actions_group(self) -> None:
         self.actions_group = Adw.PreferencesGroup(
-            title="Menu",
-            description="What appears in the popup, in order.",
+            title="Edits and shortcuts",
+            description=("What appears in the popup, in order. Give any edit its "
+                         "own shortcut to run it without the popup."),
         )
         self.page.add(self.actions_group)
 
@@ -1384,16 +1408,99 @@ class SettingsWindow(Adw.ApplicationWindow):
         box.append(add)
         self.actions_group.set_header_suffix(box)
 
+        self.trigger_rows: list[Adw.ActionRow] = []
         self.action_rows: list[Adw.ExpanderRow] = []
         self._rebuild_action_rows()
 
     def _rebuild_action_rows(self) -> None:
+        for row in getattr(self, "trigger_rows", []):
+            self.actions_group.remove(row)
+        self.trigger_rows = []
         for row in self.action_rows:
             self.actions_group.remove(row)
         self.action_rows = []
 
+        # Read once; every row below asks this map what chord it owns.
+        self._binds = keybindings.read()
+        self._binds_by_action = {}
+        for binding in self._binds:
+            key = keybindings.action_id(binding)
+            if key:
+                self._binds_by_action.setdefault(key, binding)
+
+        for binding in self._binds:
+            if not keybindings.is_menu_trigger(binding):
+                continue
+            row = Adw.ActionRow()
+            row.set_use_markup(False)
+            mouse = "mouse:" in binding.chord
+            row.set_title("Open the popup")
+            row.set_subtitle("From the pointer" if mouse
+                             else "Choose any edit from the menu")
+            row.add_prefix(Gtk.Image.new_from_icon_name(
+                "input-mouse-symbolic" if mouse else "view-list-symbolic"))
+            self._attach_chord_controls(row, binding, None)
+            self.actions_group.add(row)
+            self.trigger_rows.append(row)
+
         for index, action in enumerate(self.draft_actions):
             self.actions_group.add(self._action_row(index, action))
+
+    def _attach_chord_controls(self, row, binding, action_id_for_new) -> None:
+        """Show the chord this row owns, with buttons to change or clear it."""
+        if binding is not None:
+            keys = self._keycaps(binding.chord)
+            keys.set_valign(Gtk.Align.CENTER)
+            row.add_suffix(keys)
+
+            change = Gtk.Button()
+            change.set_child(Adw.ButtonContent(icon_name="document-edit-symbolic",
+                                               label="Change"))
+            change.add_css_class("flat")
+            change.set_valign(Gtk.Align.CENTER)
+            change.connect("clicked", lambda _b, bind=binding: self._capture_chord(bind))
+            row.add_suffix(change)
+
+            # The popup trigger is the one shortcut Quill needs; the rest are
+            # extras, so only those can be cleared.
+            if action_id_for_new is not None:
+                clear = Gtk.Button(icon_name="edit-clear-symbolic")
+                clear.add_css_class("flat")
+                clear.set_valign(Gtk.Align.CENTER)
+                clear.set_tooltip_text("Remove this shortcut")
+                clear.connect("clicked",
+                              lambda _b, bind=binding: self._clear_chord(bind))
+                row.add_suffix(clear)
+            return
+
+        assign = Gtk.Button()
+        assign.set_child(Adw.ButtonContent(icon_name="list-add-symbolic",
+                                           label="Add shortcut"))
+        assign.add_css_class("flat")
+        assign.set_valign(Gtk.Align.CENTER)
+        assign.connect("clicked",
+                       lambda _b, aid=action_id_for_new: self._capture_new_chord(aid))
+        row.add_suffix(assign)
+
+    def _capture_new_chord(self, action_id: str) -> None:
+        action = next((a for a in self.draft_actions if a.id == action_id), None)
+        if action is None:
+            return
+        placeholder = keybindings.Binding(
+            chord="", description=f"Quill: {action.label}",
+            command=keybindings.quill_command(f"run {action_id}"), line=-1)
+        self._capture_chord(placeholder, creating=True)
+
+    def _clear_chord(self, binding) -> None:
+        try:
+            keybindings.remove(binding)
+        except OSError as exc:
+            self._toast(str(exc))
+            return
+        keybindings.reload()
+        self._toast("Shortcut removed")
+        self._rebuild_action_rows()
+        self._refresh_hero()
 
     def _action_row(self, index: int, action: Action) -> Adw.ExpanderRow:
         row = Adw.ExpanderRow()
@@ -1454,6 +1561,14 @@ class SettingsWindow(Adw.ApplicationWindow):
         ask_row.connect("notify::active", lambda w, _p, i=index: self._set_action(
             i, prompts_for_input=w.get_active()))
         row.add_row(ask_row)
+
+        shortcut_row = Adw.ActionRow()
+        shortcut_row.set_use_markup(False)
+        shortcut_row.set_title("Shortcut")
+        shortcut_row.set_subtitle("Runs this edit directly, without the popup")
+        self._attach_chord_controls(
+            shortcut_row, self._binds_by_action.get(action.id), action.id)
+        row.add_row(shortcut_row)
 
         controls = Adw.ActionRow()
         controls.set_activatable(False)
