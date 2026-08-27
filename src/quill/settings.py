@@ -23,98 +23,14 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from . import config as config_mod  # noqa: E402
 from . import branding, claudecode, codex, credentials, hypr, keybindings  # noqa: E402
-from . import models, ollama  # noqa: E402
+from . import models, ollama, style, theme  # noqa: E402
 from . import openai_api, openrouter  # noqa: E402
 from . import clipboard, provider, sanitize  # noqa: E402
 from .actions import DEFAULT_ACTIONS, Action, build_messages  # noqa: E402
 from .config import CLAUDECODE, CODEX, OLLAMA, OPENAI, OPENROUTER, Config  # noqa: E402
 
-CSS = """
-.quill-hero {
-  /* No side padding: the keycaps line up with the wordmark above and the
-     section titles below, which all sit at the page's own inset. */
-  padding: 20px 0 16px 0;
-}
-/* The tutorial is a section in its own right, not loose content under a
-   heading, so it gets a container of its own. */
-.quill-tutorial {
-  padding: 14px 16px 16px 16px;
-}
-/* Status lines that report rather than invite a click. */
-.quill-badge {
-  font-size: 0.74em;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background-color: alpha(currentColor, 0.13);
-  letter-spacing: 0.4px;
-}
-.quill-secondary {
-  padding: 8px 0 0 0;
-}
-/* Keycaps. A thick border-bottom renders as a flange outside the rounded
-   corners, so the depth comes from stacked box-shadows instead: one hard
-   offset for the key's side wall, one soft one for the shadow it casts. The
-   inset highlight along the top edge is what stops a black key reading as a
-   hole on a dark background. */
-.quill-keycap {
-  background-image: linear-gradient(180deg, #26262b 0%, #131316 60%, #0e0e11 100%);
-  color: #f4f4f6;
-  border: 1px solid alpha(#ffffff, 0.13);
-  border-radius: 7px;
-  padding: 5px 11px;
-  min-width: 15px;
-  font-weight: 700;
-  box-shadow: inset 0 1px 0 alpha(#ffffff, 0.13),
-              0 2px 0 #08080a,
-              0 3px 5px alpha(#000000, 0.5);
-}
-.quill-keycap-lg {
-  font-size: 1.75em;
-  padding: 9px 20px;
-  min-width: 34px;
-  border-radius: 11px;
-  box-shadow: inset 0 1.5px 0 alpha(#ffffff, 0.15),
-              0 4px 0 #08080a,
-              0 6px 10px alpha(#000000, 0.55);
-}
-.quill-plus {
-  font-size: 1.15em;
-  font-weight: 700;
-  opacity: 0.4;
-}
-.quill-plus-lg { font-size: 1.6em; }
-.quill-sample,
-.quill-sample text,
-.quill-sample text selection {
-  background-color: transparent;
-  background-image: none;
-}
-.quill-sample text selection {
-  background-color: alpha(@accent_bg_color, 0.45);
-}
-.quill-sample-frame {
-  border: 1px solid alpha(currentColor, 0.16);
-  border-radius: 9px;
-  padding: 8px 10px;
-}
-.quill-result-frame {
-  border: 1px solid alpha(@accent_bg_color, 0.45);
-  background-color: alpha(@accent_bg_color, 0.10);
-  border-radius: 9px;
-  padding: 8px 10px;
-}
-.quill-was {
-  opacity: 0.55;
-  text-decoration: line-through;
-}
-.quill-step {
-  font-weight: 700;
-  font-size: 0.78em;
-  opacity: 0.55;
-  letter-spacing: 0.8px;
-}
-"""
+# The stylesheet is generated per launch by theme.py, painted in whatever
+# Omarchy theme is current, and installed by style.apply() in run().
 
 KEEP_ALIVE_HINT = ("How long the model stays in VRAM. Longer keeps repeat "
                    "edits instant; 0 frees the GPU immediately.")
@@ -163,12 +79,27 @@ class SettingsWindow(Adw.ApplicationWindow):
         self._build_behaviour_group()
         self._build_actions_group()
 
+        self._build_theme_note()
+
         self._ready = True
         self._sync_account_row()
         self._sync_provider()
         self._refresh_provider_badges()
 
 
+
+    def _build_theme_note(self) -> None:
+        """Why the window looks the way it does, for anyone who wonders."""
+        palette = theme.load()
+        if palette is None:
+            return
+        group = Adw.PreferencesGroup()
+        self.page.add(group)
+        name = palette.name.replace("-", " ").title() or "your theme"
+        group.add(self._caption_line(
+            f"Colours and type follow your Omarchy theme — currently {name}. "
+            f"Switch themes and this window follows.",
+            icon="applications-graphics-symbolic"))
 
     @staticmethod
     def _keycaps(chord: str, large: bool = False) -> Gtk.Box:
@@ -694,7 +625,9 @@ class SettingsWindow(Adw.ApplicationWindow):
         # These report state; they are not settings. Adding a non-row widget to
         # a PreferencesGroup places it below the card, which is exactly the
         # "secondary" weight they should carry.
-        secondary = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+        # Stacked, not side by side: in a monospaced face two status lines and
+        # a button do not fit across the window, and both were wrapping.
+        secondary = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         secondary.add_css_class("quill-secondary")
 
         status_line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -713,6 +646,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         refresh.connect("clicked", lambda *_: self._refresh_all())
         status_line.append(self.status_icon)
         status_line.append(self.status_label)
+        status_line.append(refresh)
         secondary.append(status_line)
 
         privacy_line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -727,7 +661,6 @@ class SettingsWindow(Adw.ApplicationWindow):
         privacy_line.append(self.privacy_label)
         secondary.append(privacy_line)
 
-        secondary.append(refresh)
         group.add(secondary)
 
 
@@ -1901,12 +1834,11 @@ def run(cfg: Config) -> int:
     app = Adw.Application(application_id="com.omarchy.Quill.Settings",
                           flags=Gio.ApplicationFlags.FLAGS_NONE)
 
-    provider_css = Gtk.CssProvider()
-    provider_css.load_from_data(CSS.encode("utf-8"))
-    display = Gdk.Display.get_default()
-    if display is not None:
-        Gtk.StyleContext.add_provider_for_display(
-            display, provider_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+    # Held on the application so the file monitor is not collected: a dropped
+    # GFileMonitor stops emitting, and the window silently stops following
+    # theme changes.
+    app._quill_css = style.apply()
+    app._quill_theme_watch = style.watch(app._quill_css)
 
     def on_activate(application):
         # A unique application id means a second launch focuses this window

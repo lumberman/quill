@@ -363,6 +363,39 @@ Changes apply on **Save**; closing the window discards them. Saving rewrites
 settings themselves survive. If you would rather keep a commented file, edit it
 by hand and leave this window alone.
 
+## It wears your Omarchy theme
+
+Quill has no appearance settings, because it takes them from your desktop.
+Switch themes and both the popup and the settings window follow — while they
+are open, without a restart.
+
+Omarchy keeps the live palette in
+`~/.local/state/omarchy/current/theme/colors.toml` and regenerates per-app
+config from templates on every theme change. GTK apps are not in that pipeline:
+`omarchy-theme-set-gnome` only flips Adwaita between its light and dark
+presets, so a GTK app on Omarchy is stock blue Adwaita on a desktop that is
+otherwise, say, entirely blue-grey Lumon. Quill reads the palette itself,
+applying the same alias-and-fallback cascade `omarchy-theme-color` applies —
+`tests/test_theme.py` checks the two agree on every key of every theme
+installed on your machine.
+
+What it takes from the theme:
+
+| | |
+|---|---|
+| Colours | the whole palette, mapped onto the libadwaita colour names, so stock widgets are re-skinned rather than re-implemented |
+| Type | whatever `monospace` resolves to — the font the bar and menus render in |
+| Corners | Hyprland's `decoration:rounding`, so cards match the window frame |
+| Chrome | outlined controls at 35% foreground, no drop shadows — the shell's convention, not Adwaita's |
+| Selection | a wash of the foreground with accent-coloured text, the way Omarchy's own menus mark a row |
+
+Label colours on filled buttons are chosen by contrast rather than convention,
+so they stay legible on light themes where nothing in the palette clears
+4.5:1 against the accent.
+
+Set `QUILL_NO_THEME=1` to leave it stock libadwaita. Off Omarchy, that is what
+you get anyway.
+
 ## Configuration
 
 `~/.config/quill/config.toml`, all keys optional. See
