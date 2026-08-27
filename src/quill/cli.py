@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import atexit
 import os
+import time
 import signal
 import sys
 import threading
@@ -15,6 +16,11 @@ from . import config as config_mod
 from . import provider, sanitize, state
 from .actions import build_messages
 from .config import Config, config_path, load
+
+
+def _ellipsis(text: str, limit: int) -> str:
+    flat = " ".join(text.split())
+    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
 
 
 def _runtime_dir() -> Path:
@@ -103,40 +109,52 @@ def cmd_run(args, cfg: Config) -> int:
     notice = None
     if not quiet:
         notice = hypr.notify(
-            f"Quill · {action.label}",
-            provider.label(cfg),
+            action.label,
+            f"Working… · {provider.label(cfg)}",
             transient=True,
-            # Long enough to outlive a slow backend; closed explicitly below.
+            # Long enough to outlive a slow backend; replaced below.
             timeout_ms=120000,
             want_id=True,
         )
 
     messages = build_messages(action, text, args.instruction or "")
+    started = time.monotonic()
     try:
         with state.working(action.label):
             chunks = list(provider.stream_chat(cfg, messages, action.temperature))
     except provider.ProviderError as exc:
-        hypr.notify("Quill failed", str(exc), urgency="critical",
+        hypr.notify(f"{action.label} failed", str(exc), urgency="critical",
                     replace_id=notice)
         return 1
 
     result = sanitize.clean_output("".join(chunks), text)
     if not result.strip():
-        hypr.notify("Quill: the model returned nothing",
-                    "Nothing was replaced.", urgency="critical",
-                    replace_id=notice)
+        hypr.notify("The model returned nothing",
+                    f"Your text was left alone · {provider.label(cfg)}",
+                    urgency="critical", replace_id=notice)
         return 1
 
     if result.strip() == text.strip():
         # Say so, or a no-op looks identical to a failure.
-        hypr.notify("Quill: no changes needed", action.label,
-                    replace_id=notice, transient=True, timeout_ms=2000)
+        hypr.notify("Nothing to change",
+                    f"{action.label} found no errors · {provider.label(cfg)}",
+                    replace_id=notice, transient=True, timeout_ms=3000)
         return 0
 
     clipboard.replace_selection(result, win, saved,
                                 restore_clipboard=cfg.restore_clipboard)
-    # The text visibly changing is the confirmation; anything more is noise.
-    hypr.close_notification(notice)
+
+    if not quiet:
+        # Say what changed, not just that something did. With auto-replace on
+        # this is the only record of the edit the user gets.
+        elapsed = time.monotonic() - started
+        hypr.notify(
+            f"{action.label} · {elapsed:.1f}s",
+            f"{_ellipsis(result, 160)}\n\n{provider.label(cfg)}",
+            replace_id=notice, transient=True, timeout_ms=6000,
+        )
+    else:
+        hypr.close_notification(notice)
     return 0
 
 

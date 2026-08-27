@@ -22,7 +22,7 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from . import config as config_mod  # noqa: E402
-from . import claudecode, codex, credentials, hypr, models, ollama  # noqa: E402
+from . import branding, claudecode, codex, credentials, hypr, models, ollama  # noqa: E402
 from . import openai_api, openrouter  # noqa: E402
 from . import clipboard, provider, sanitize  # noqa: E402
 from .actions import DEFAULT_ACTIONS, Action, build_messages  # noqa: E402
@@ -140,6 +140,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.page = Adw.PreferencesPage()
         self.toasts.set_child(self.page)
 
+        self._build_brand()
         self._build_hero()
         self._build_tutorial()
         self._build_shortcuts_group()
@@ -192,6 +193,33 @@ class SettingsWindow(Adw.ApplicationWindow):
             box.append(cap)
         return box
 
+    def _build_brand(self) -> None:
+        group = Adw.PreferencesGroup()
+        self.page.add(group)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
+        row.set_halign(Gtk.Align.CENTER)
+        row.set_margin_top(14)
+
+        icon = branding.icon_path()
+        if icon:
+            mark = Gtk.Image.new_from_file(icon)
+            mark.set_pixel_size(52)
+            row.append(mark)
+
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        text.set_valign(Gtk.Align.CENTER)
+        name = Gtk.Label(label=branding.NAME, xalign=0)
+        name.add_css_class("title-1")
+        tagline = Gtk.Label(label=branding.TAGLINE, xalign=0)
+        tagline.add_css_class("caption")
+        tagline.add_css_class("dim-label")
+        text.append(name)
+        text.append(tagline)
+        row.append(text)
+
+        group.add(row)
+
     def _build_hero(self) -> None:
         """Keys on the left, what they do on the right.
 
@@ -233,7 +261,12 @@ class SettingsWindow(Adw.ApplicationWindow):
 
         group.add(grid)
 
-    SAMPLE = "i has recieved you're mesage yesterday and we was gonna reply."
+    SAMPLE = (
+        "i has recieved you're mesage yesterday and we was gonna reply.\n"
+        "the subttitle translation is not finished yet, so pleese focuse on "
+        "the assigment first.\n"
+        "i will be back to you about chinese subtitles later."
+    )
 
     def _build_tutorial(self) -> None:
         """A rehearsal of the real thing, not a simulation of it.
@@ -255,12 +288,17 @@ class SettingsWindow(Adw.ApplicationWindow):
         box.set_margin_top(6)
 
         # --- step 1 -------------------------------------------------------
-        self.step1 = self._step_header(1, "Select the text below")
+        self.step1 = self._step_header(1, "Select some of the text below")
         box.append(self.step1)
 
         self.sample_view = Gtk.TextView()
         self.sample_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
         self.sample_view.add_css_class("quill-sample")
+        # Multiline on purpose: selecting a phrase out of a paragraph is the
+        # real case, not selecting one tidy sentence.
+        self.sample_view.set_size_request(-1, 96)
+        self.sample_view.set_top_margin(4)
+        self.sample_view.set_bottom_margin(4)
         buffer = self.sample_view.get_buffer()
         buffer.set_text(self.SAMPLE)
         self.tutorial_before = self.SAMPLE
@@ -271,6 +309,13 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.sample_view.set_hexpand(True)
         frame.append(self.sample_view)
         box.append(frame)
+
+        hint = Gtk.Label(
+            label="A few words is enough — Quill only ever touches what you selected.",
+            xalign=0)
+        hint.add_css_class("caption")
+        hint.add_css_class("dim-label")
+        box.append(hint)
 
         # --- step 2, hidden until the sample is selected -------------------
         self.step2_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -848,16 +893,19 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.codex_status_row.add_suffix(signin)
         self.codex_group.add(self.codex_status_row)
 
-        configured = codex.configured_model()
-        model_row = Adw.ActionRow()
-        model_row.set_use_markup(False)
-        model_row.set_title("Model")
-        model_row.set_subtitle(
-            f"{configured} — set in your Codex config. A ChatGPT account "
-            f"restricts which models Codex may use, so speed is set below."
-            if configured else
-            "Chosen by Codex. A ChatGPT account restricts the options.")
-        self.codex_group.add(model_row)
+        self._codex_model = self.cfg.codex_model or codex.DEFAULT_MODEL
+
+        def pick_model(value):
+            self._codex_model = value
+            self._refresh_status()
+
+        self._radio_picker(
+            self.codex_group,
+            [(m, codex.MODEL_LABELS.get(m, m),
+              "Recommended — measured 3.7s against 4.4s for Sol"
+              if m == codex.DEFAULT_MODEL else "")
+             for m in codex.MODELS],
+            self._codex_model, pick_model)
 
         self._codex_effort = self.cfg.codex_effort or "low"
 
@@ -873,7 +921,7 @@ class SettingsWindow(Adw.ApplicationWindow):
             self._codex_effort, pick_effort)
 
         self.codex_model_row = Adw.EntryRow(title="Model override (advanced)")
-        self.codex_model_row.set_text(self.cfg.codex_model)
+        self.codex_model_row.set_text("")
 
         speed = Adw.ActionRow()
         speed.set_use_markup(False)
@@ -1143,12 +1191,18 @@ class SettingsWindow(Adw.ApplicationWindow):
         )
         self.page.add(self.actions_group)
 
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        add = Gtk.Button(label="Add")
-        add.connect("clicked", lambda *_: self._add_action())
-        reset = Gtk.Button(label="Reset")
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        reset = Gtk.Button()
+        reset.set_child(Adw.ButtonContent(icon_name="view-refresh-symbolic",
+                                          label="Reset"))
+        reset.add_css_class("flat")
         reset.set_tooltip_text("Restore the built-in menu")
         reset.connect("clicked", lambda *_: self._reset_actions())
+        add = Gtk.Button()
+        add.set_child(Adw.ButtonContent(icon_name="list-add-symbolic",
+                                        label="Add"))
+        add.add_css_class("flat")
+        add.connect("clicked", lambda *_: self._add_action())
         box.append(reset)
         box.append(add)
         self.actions_group.set_header_suffix(box)
@@ -1296,7 +1350,8 @@ class SettingsWindow(Adw.ApplicationWindow):
         cfg.openai_base_url = self._openai_base_url()
         cfg.openai_model = (self.openai_model_row.get_text().strip()
                             or self.cfg.openai_model)
-        cfg.codex_model = self.codex_model_row.get_text().strip()
+        cfg.codex_model = (self.codex_model_row.get_text().strip()
+                           or getattr(self, "_codex_model", cfg.codex_model))
         cfg.codex_effort = getattr(self, "_codex_effort", cfg.codex_effort)
         cfg.claude_model = getattr(self, "_claude_model", cfg.claude_model)
         cfg.host = self.host_row.get_text().strip() or self.cfg.host

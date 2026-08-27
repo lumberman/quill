@@ -133,11 +133,13 @@ def notify(summary: str, body: str = "", urgency: str = "normal",
     The id lets a long-running action update one notification in place instead
     of stacking several.
     """
+    from .branding import NAME, icon_path
+
     args = [
         "notify-send",
-        "-a", "Quill",
+        "-a", NAME,
         "-u", urgency,
-        "-i", "accessories-text-editor",
+        "-i", icon_path() or "accessories-text-editor",
     ]
     if replace_id:
         args += ["-r", str(replace_id)]

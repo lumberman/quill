@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Quill mark: a fountain-pen nib, upright and symmetric so it stays legible
+     down to 16px. Shoulders at the top, tapering to a point, with a breather
+     hole and the slit running from it to the tip. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="badge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5b7cfa"/>
+      <stop offset="1" stop-color="#3550d8"/>
+    </linearGradient>
+    <linearGradient id="nib" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#d8dffa"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="4" y="4" width="120" height="120" rx="30" fill="url(#badge)"/>
+  <rect x="4" y="4" width="120" height="120" rx="30" fill="none"
+        stroke="#ffffff" stroke-opacity="0.20" stroke-width="2"/>
+
+  <g transform="rotate(-18 64 64)">
+    <path d="M64 104
+             C 56 84, 47 66, 45 52
+             C 43 38, 52 30, 64 30
+             C 76 30, 85 38, 83 52
+             C 81 66, 72 84, 64 104 Z"
+          fill="url(#nib)"/>
+    <circle cx="64" cy="52" r="7.5" fill="#3550d8" fill-opacity="0.8"/>
+    <path d="M64 61 L64 99" stroke="#3550d8" stroke-opacity="0.6"
+          stroke-width="4.5" stroke-linecap="round"/>
+  </g>
+</svg>

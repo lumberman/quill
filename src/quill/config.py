@@ -54,8 +54,9 @@ class Config:
     # Any OpenAI-compatible server: LM Studio, llama.cpp, vLLM, api.openai.com.
     openai_base_url: str = DEFAULT_OPENAI_BASE_URL
     openai_model: str = "local-model"
-    # Empty means "whatever Codex is configured to use".
-    codex_model: str = ""
+    # Fastest model a ChatGPT account will accept; blank falls back to
+    # whatever the user's own Codex config selects.
+    codex_model: str = "gpt-5.6-luna"
     # Codex's real speed lever; a ChatGPT account restricts model choice.
     codex_effort: str = "low"
     # Alias the Claude Code CLI accepts. Haiku is the fastest.

@@ -21,7 +21,8 @@ openai_model = "local-model"
 # --- ChatGPT subscription --------------------------------------------------
 # Used when provider = "codex". A ChatGPT account restricts which models Codex
 # may use, so the speed lever is reasoning effort: "low", "medium" or "high".
-codex_model = ""
+# gpt-5.6-luna measured 3.7s against gpt-5.6-sol's 4.4s, same output.
+codex_model = "gpt-5.6-luna"
 codex_effort = "low"
 
 # --- Claude subscription ---------------------------------------------------

@@ -22,8 +22,18 @@ from pathlib import Path
 
 BINARY = "codex"
 
-# A ChatGPT account restricts which models Codex may use, so the speed knob is
-# reasoning effort, not model choice. Measured: low 4.5s, high 5.5s, same answer.
+# A ChatGPT account rejects most model names, but not all of them: an earlier
+# note here claimed model choice was unavailable, which was wrong -- it was
+# tested with two invented names. Measured over three runs each on a one-line
+# fix: luna 3.74s mean, sol 4.44s, identical output.
+MODELS = ("gpt-5.6-luna", "gpt-5.6-sol")
+DEFAULT_MODEL = "gpt-5.6-luna"
+MODEL_LABELS = {
+    "gpt-5.6-luna": "Luna — fastest",
+    "gpt-5.6-sol": "Sol — slower, more capable",
+}
+
+# Reasoning effort is the other lever. Measured: low 4.5s, high 5.5s, same answer.
 EFFORTS = ("low", "medium", "high")
 EFFORT_LABELS = {
     "low": "Fast — least deliberation",
