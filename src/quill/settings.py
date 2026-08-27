@@ -1617,9 +1617,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                              else "Choose any edit from the menu")
             row.add_prefix(Gtk.Image.new_from_icon_name(
                 "input-mouse-symbolic" if mouse else "view-list-symbolic"))
-            # Quill needs one way in, so the last remaining trigger stays put.
-            self._attach_chord_controls(row, binding, None,
-                                       allow_clear=len(triggers) > 1)
+            self._attach_chord_controls(row, binding, None)
             self.actions_group.add(row)
             self.trigger_rows.append(row)
 
@@ -1638,11 +1636,8 @@ class SettingsWindow(Adw.ApplicationWindow):
             self.actions_group.add(self._action_row(index, action))
 
     def _attach_chord_controls(self, row, binding, action_id_for_new,
-                               allow_clear: bool | None = None,
                                on_add=None) -> None:
         """Show the chord this row owns, with buttons to change or clear it."""
-        if allow_clear is None:
-            allow_clear = action_id_for_new is not None
         if binding is not None:
             keys = self._keycaps(binding.chord)
             keys.set_valign(Gtk.Align.CENTER)
@@ -1656,7 +1651,9 @@ class SettingsWindow(Adw.ApplicationWindow):
             change.connect("clicked", lambda _b, bind=binding: self._capture_chord(bind))
             row.add_suffix(change)
 
-            if allow_clear:
+            # Opening the popup is what Quill is for, so those two rows
+            # only offer Change. The per-edit shortcuts are extras.
+            if action_id_for_new is not None:
                 clear = Gtk.Button(icon_name="edit-clear-symbolic")
                 clear.add_css_class("flat")
                 clear.set_valign(Gtk.Align.CENTER)
