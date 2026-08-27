@@ -412,11 +412,13 @@ list.boxed-list, .card {{
   box-shadow: none;
 }}
 /* libadwaita separates boxed-list rows with a bottom border; the shell's
-   lists have none, and the spacing does the separating. */
-list.boxed-list > row,
-list.boxed-list > row:not(:last-child),
-row.expander list > row,
-row.expander list > row:not(:last-child) {{
+   lists have none, and the spacing does the separating. Option fields are
+   excluded: that bottom border is one side of the box they draw around
+   themselves, and zeroing it left every option open along the bottom. */
+list.boxed-list > row:not(.quill-option),
+list.boxed-list > row:not(.quill-option):not(:last-child),
+row.expander list > row:not(.quill-option),
+row.expander list > row:not(.quill-option):not(:last-child) {{
   border-bottom-width: 0;
   box-shadow: none;
 }}
