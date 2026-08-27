@@ -31,11 +31,21 @@ CSS = """
 .quill-hero {
   padding: 22px 12px 18px 12px;
 }
+/* The tutorial is a section in its own right, not loose content under a
+   heading, so it gets a container of its own. */
+.quill-tutorial {
+  padding: 14px 16px 16px 16px;
+}
+/* Status lines that report rather than invite a click. */
+.quill-secondary {
+  padding: 8px 4px 0 4px;
+}
 /* Keycaps. The thicker bottom border is what reads as a physical key. */
 .quill-keycap {
-  background-color: alpha(currentColor, 0.10);
-  border: 1px solid alpha(currentColor, 0.30);
-  border-bottom: 3px solid alpha(currentColor, 0.42);
+  background-color: #0b0b0d;
+  color: #f2f2f4;
+  border: 1px solid alpha(#ffffff, 0.16);
+  border-bottom: 3px solid #000000;
   border-radius: 8px;
   padding: 5px 12px;
   font-weight: 800;
@@ -214,8 +224,9 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.page.add(group)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.add_css_class("card")
+        box.add_css_class("quill-tutorial")
         box.set_margin_top(6)
-        box.set_margin_bottom(6)
 
         # --- step 1 -------------------------------------------------------
         self.step1 = self._step_header(1, "Select the text below")
@@ -420,25 +431,41 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.provider_row.connect("notify::selected", lambda *_: self._sync_provider())
         group.add(self.provider_row)
 
-        self.privacy_row = Adw.ActionRow()
-        self.privacy_row.set_use_markup(False)
-        self.privacy_row.set_title("Privacy")
-        self.privacy_row.add_prefix(
-            Gtk.Image.new_from_icon_name("security-high-symbolic"))
-        group.add(self.privacy_row)
+        # These report state; they are not settings. Adding a non-row widget to
+        # a PreferencesGroup places it below the card, which is exactly the
+        # "secondary" weight they should carry.
+        secondary = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        secondary.add_css_class("quill-secondary")
 
-        self.status_row = Adw.ActionRow()
-        self.status_row.set_use_markup(False)
-        self.status_row.set_title("Status")
+        status_line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
         self.status_icon = Gtk.Image.new_from_icon_name("emblem-ok-symbolic")
-        self.status_row.add_prefix(self.status_icon)
+        self.status_icon.set_valign(Gtk.Align.START)
+        self.status_label = Gtk.Label(xalign=0, wrap=True)
+        self.status_label.add_css_class("caption")
+        self.status_label.set_hexpand(True)
         refresh = Gtk.Button(icon_name="view-refresh-symbolic")
         refresh.set_valign(Gtk.Align.CENTER)
         refresh.add_css_class("flat")
         refresh.set_tooltip_text("Re-check the backend")
         refresh.connect("clicked", lambda *_: self._refresh_all())
-        self.status_row.add_suffix(refresh)
-        group.add(self.status_row)
+        status_line.append(self.status_icon)
+        status_line.append(self.status_label)
+        status_line.append(refresh)
+        secondary.append(status_line)
+
+        privacy_line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+        privacy_icon = Gtk.Image.new_from_icon_name("security-high-symbolic")
+        privacy_icon.set_valign(Gtk.Align.START)
+        privacy_icon.add_css_class("dim-label")
+        self.privacy_label = Gtk.Label(xalign=0, wrap=True)
+        self.privacy_label.add_css_class("caption")
+        self.privacy_label.add_css_class("dim-label")
+        self.privacy_label.set_hexpand(True)
+        privacy_line.append(privacy_icon)
+        privacy_line.append(self.privacy_label)
+        secondary.append(privacy_line)
+
+        group.add(secondary)
 
 
     def _provider_value(self) -> str:
@@ -471,7 +498,7 @@ class SettingsWindow(Adw.ApplicationWindow):
                     "provider serves the model. Free models are often trained on.")
         else:
             note = f"Selected text is sent to {self._openai_base_url()}."
-        self.privacy_row.set_subtitle(note)
+        self.privacy_label.set_label(note)
         self._refresh_status()
 
     # -- openrouter --------------------------------------------------------
@@ -759,12 +786,17 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.pull_row.add_suffix(copy_pull)
         group.add(self.pull_row)
 
-        self.detail_row = Adw.ActionRow()
-        self.detail_row.set_use_markup(False)
-        self.detail_row.set_title("What that means")
-        self.detail_row.add_prefix(
-            Gtk.Image.new_from_icon_name("dialog-information-symbolic"))
-        group.add(self.detail_row)
+        self.detail_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+        self.detail_box.add_css_class("quill-secondary")
+        detail_icon = Gtk.Image.new_from_icon_name("dialog-information-symbolic")
+        detail_icon.set_valign(Gtk.Align.START)
+        detail_icon.add_css_class("dim-label")
+        self.detail_label = Gtk.Label(xalign=0, wrap=True)
+        self.detail_label.add_css_class("caption")
+        self.detail_label.add_css_class("dim-label")
+        self.detail_label.set_hexpand(True)
+        self.detail_box.append(detail_icon)
+        self.detail_box.append(self.detail_label)
 
         # Tuning knobs almost nobody touches, folded away by default.
         advanced = Adw.ExpanderRow(title="Advanced")
@@ -793,6 +825,8 @@ class SettingsWindow(Adw.ApplicationWindow):
         )
         advanced.add_row(self.ctx_row)
 
+        group.add(self.detail_box)
+
         self._reload_model_list()
 
     def _reload_model_list(self) -> None:
@@ -815,9 +849,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         """Explain the trade-off for whatever is selected, in place."""
         selected = self._selected_model()
         self.model_row.set_subtitle(models.describe(selected))
-        detail = models.detail(selected)
-        self.detail_row.set_subtitle(detail or models.COMPARISON)
-        self.detail_row.set_visible(True)
+        self.detail_label.set_label(models.detail(selected) or models.COMPARISON)
         note = models.note_for(selected)
         if note and note.tier == models.UNSUITED:
             self.model_row.add_css_class("error")
@@ -856,12 +888,18 @@ class SettingsWindow(Adw.ApplicationWindow):
             self._reload_model_list()
         probe = self._collect()
         usable, reason = provider.ready(probe)
-        self.status_row.set_subtitle(reason)
+        self.status_label.set_label(reason)
         if usable:
-            self.status_row.remove_css_class("error")
+            self.status_label.remove_css_class("error")
+            self.status_label.add_css_class("dim-label")
+            self.status_icon.remove_css_class("error")
+            self.status_icon.add_css_class("dim-label")
             self.status_icon.set_from_icon_name("emblem-ok-symbolic")
         else:
-            self.status_row.add_css_class("error")
+            self.status_label.remove_css_class("dim-label")
+            self.status_label.add_css_class("error")
+            self.status_icon.remove_css_class("dim-label")
+            self.status_icon.add_css_class("error")
             self.status_icon.set_from_icon_name("dialog-warning-symbolic")
 
     def _selected_model(self) -> str:

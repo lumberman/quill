@@ -43,7 +43,9 @@ class Config:
     request_timeout: float = 120.0
     restore_clipboard: bool = True
     # Replace immediately instead of showing the result for review first.
-    auto_replace: bool = False
+    # On by default: the edit is the point, and the result panel is a
+    # checkpoint most people stop wanting after the first day.
+    auto_replace: bool = True
     # Kept separate from `model` so switching providers back and forth does
     # not lose the other one's choice.
     openrouter_model: str = DEFAULT_OPENROUTER_MODEL

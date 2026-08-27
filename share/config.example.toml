@@ -50,8 +50,9 @@ request_timeout = 120.0
 # Put the clipboard back the way it was after replacing text.
 restore_clipboard = true
 
-# Skip the review step and paste as soon as the model finishes.
-auto_replace = false
+# Paste as soon as the model finishes, skipping the review panel.
+# Set to false to see the result and confirm before it replaces your text.
+auto_replace = true
 
 # --- Actions ---------------------------------------------------------------
 # Uncommenting ANY [[actions]] block replaces the whole default menu, so list

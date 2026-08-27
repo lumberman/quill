@@ -330,7 +330,7 @@ Below that, everything in the config file:
   "Ollama is running · <model> is installed" check and a refresh button
 - **Keep in memory**, context window, Ollama host
 - **Let the model think first** — off by default, and the row explains why
-- **Replace without reviewing**, restore-clipboard, request timeout
+- **Replace without reviewing** (on by default), restore-clipboard, timeout
 - **Menu** — rename edits, rewrite their prompts, change temperature, reorder,
   add and remove
 
@@ -350,7 +350,7 @@ reuses its built-in prompt.
 ```toml
 model = "gemma4:12b-it-qat"
 keep_alive = "30m"
-auto_replace = false   # true = paste as soon as the model finishes, no review
+auto_replace = true    # false = show the result and confirm before replacing
 
 [[actions]]
 id = "translate_ru"
