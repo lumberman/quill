@@ -22,7 +22,8 @@ gi.require_version("Gdk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from . import config as config_mod  # noqa: E402
-from . import branding, claudecode, codex, credentials, hypr, models, ollama  # noqa: E402
+from . import branding, claudecode, codex, credentials, hypr, keybindings  # noqa: E402
+from . import models, ollama  # noqa: E402
 from . import openai_api, openrouter  # noqa: E402
 from . import clipboard, provider, sanitize  # noqa: E402
 from .actions import DEFAULT_ACTIONS, Action, build_messages  # noqa: E402
@@ -198,7 +199,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.page.add(group)
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
-        row.set_halign(Gtk.Align.CENTER)
+        row.set_halign(Gtk.Align.START)
         row.set_margin_top(14)
 
         icon = branding.icon_path()
@@ -230,36 +231,43 @@ class SettingsWindow(Adw.ApplicationWindow):
         group = Adw.PreferencesGroup()
         self.page.add(group)
 
-        grid = Gtk.Grid()
+        self.hero_grid = Gtk.Grid()
+        grid = self.hero_grid
         grid.add_css_class("quill-hero")
         grid.set_column_spacing(18)
-        grid.set_row_spacing(14)
-        grid.set_halign(Gtk.Align.CENTER)
+        grid.set_row_spacing(10)
+        grid.set_halign(Gtk.Align.START)
+        group.add(grid)
+        self._fill_hero()
+
+    def _fill_hero(self) -> None:
+        grid = self.hero_grid
+        child = grid.get_first_child()
+        while child is not None:
+            nxt = child.get_next_sibling()
+            grid.remove(child)
+            child = nxt
 
         binds = hypr.binds_matching("quill")
         primary = next((c for c, w in binds if "menu" in w.lower()), "Super + I")
         secondary = next((c for c, w in binds if "menu" not in w.lower()), None)
 
-        rows = [(primary, "Select text in any app, then press this", True)]
+        rows = [(primary, "Select text in any app, then press this")]
         if secondary:
-            rows.append((secondary, "Fix grammar in place, without the popup", False))
+            rows.append((secondary, "Fix grammar in place, without the popup"))
 
-        for index, (chord, text, large) in enumerate(rows):
-            keys = self._keycaps(chord, large=large)
-            keys.set_halign(Gtk.Align.END)
+        # One size for both: they are two equal ways to do the same job, and
+        # sizing one of them up implied a hierarchy that is not there.
+        for index, (chord, text) in enumerate(rows):
+            keys = self._keycaps(chord)
+            keys.set_halign(Gtk.Align.START)
             keys.set_valign(Gtk.Align.CENTER)
             grid.attach(keys, 0, index, 1, 1)
 
             label = Gtk.Label(label=text, xalign=0)
             label.set_valign(Gtk.Align.CENTER)
-            if large:
-                label.add_css_class("title-4")
-            else:
-                label.add_css_class("caption")
-                label.add_css_class("dim-label")
+            label.add_css_class("body")
             grid.attach(label, 1, index, 1, 1)
-
-        group.add(grid)
 
     SAMPLE = (
         "i has recieved you're mesage yesterday and we was gonna reply.\n"
@@ -277,8 +285,8 @@ class SettingsWindow(Adw.ApplicationWindow):
         popup, which pastes back into this very field.
         """
         group = Adw.PreferencesGroup(
-            title="Try it here",
-            description="Three steps, using the real shortcut on real text.",
+            title="Playground",
+            description="Practise on this text; your own documents are untouched.",
         )
         self.page.add(group)
 
@@ -317,10 +325,9 @@ class SettingsWindow(Adw.ApplicationWindow):
         hint.add_css_class("dim-label")
         box.append(hint)
 
-        # --- step 2, hidden until the sample is selected -------------------
+        # --- step 2, shown from the start so the whole job is visible ------
         self.step2_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.step2_box.set_margin_top(10)
-        self.step2_box.set_visible(False)
         box.append(self.step2_box)
 
         self.step2 = self._step_header(2, "Press either shortcut")
@@ -382,7 +389,6 @@ class SettingsWindow(Adw.ApplicationWindow):
         group.add(box)
         self._set_step_state(1, "todo")
         self._set_step_state(2, "todo")
-        self._set_step_state(3, "done")
 
     def _step_header(self, number: int, text: str) -> Gtk.Box:
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -426,7 +432,6 @@ class SettingsWindow(Adw.ApplicationWindow):
             return
         self.tutorial_before = selected
         self._set_step_state(1, "done")
-        self.step2_box.set_visible(True)
 
     def _tutorial_changed(self) -> None:
         """The buffer changing under the paste is what completes step three."""
@@ -446,39 +451,55 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.tutorial_before = self.SAMPLE
         self._set_step_state(1, "todo")
         self._set_step_state(2, "todo")
-        self.step2_box.set_visible(False)
         self.step3_box.set_visible(False)
 
     def _build_shortcuts_group(self) -> None:
-        """Reference, not a setting.
+        """Reference and editor. The chords come from bindings.lua itself."""
+        self.shortcuts_group = Adw.PreferencesGroup()
+        self.page.add(self.shortcuts_group)
 
-        This used to be eight always-open rows, which pushed the thing people
-        actually come here to change below the fold. It is now one row: the two
-        chords that matter are in the subtitle, the rest is one click away.
-        """
-        group = Adw.PreferencesGroup()
-        self.page.add(group)
+        self.shortcuts_expander = Adw.ExpanderRow(title="Shortcuts")
+        self.shortcuts_expander.set_use_markup(False)
+        self.shortcuts_expander.add_prefix(
+            Gtk.Image.new_from_icon_name("input-keyboard-symbolic"))
+        self.shortcuts_group.add(self.shortcuts_expander)
 
-        expander = Adw.ExpanderRow(title="Shortcuts")
-        expander.set_use_markup(False)
-        expander.add_prefix(Gtk.Image.new_from_icon_name("input-keyboard-symbolic"))
-        group.add(expander)
+        self.shortcut_rows: list[Adw.ActionRow] = []
+        self._fill_shortcut_rows()
 
-        # Several chords can share one description; list them on one line
-        # rather than repeating the description per chord.
-        grouped: dict[str, list[str]] = {}
-        for chord, what in hypr.binds_matching("quill"):
-            label = what[0].upper() + what[1:] if what else "Open Quill"
-            grouped.setdefault(label, []).append(chord)
-        rows = [(",  ".join(chords), label) for label, chords in grouped.items()]
-        if not rows:
-            rows.append(("Super + I", "Not currently bound"))
+    def _fill_shortcut_rows(self) -> None:
+        for row in self.shortcut_rows:
+            self.shortcuts_expander.remove(row)
+        self.shortcut_rows = []
 
-        headline = "  ·  ".join(f"{chord} — {label.lower()}"
-                                for chord, label in rows[:2])
-        expander.set_subtitle(headline or "Keyboard and mouse")
+        editable = keybindings.read()
+        for binding in editable:
+            row = Adw.ActionRow()
+            row.set_use_markup(False)
+            row.set_title(binding.label)
+            keys = self._keycaps(binding.chord)
+            keys.set_valign(Gtk.Align.CENTER)
+            row.add_suffix(keys)
+            change = Gtk.Button()
+            change.set_child(Adw.ButtonContent(icon_name="document-edit-symbolic",
+                                               label="Change"))
+            change.add_css_class("flat")
+            change.set_valign(Gtk.Align.CENTER)
+            change.connect("clicked", lambda _b, bind=binding: self._capture_chord(bind))
+            row.add_suffix(change)
+            self.shortcuts_expander.add_row(row)
+            self.shortcut_rows.append(row)
 
-        for chord, what in rows + self.IN_APP_SHORTCUTS:
+        if not editable:
+            row = Adw.ActionRow()
+            row.set_use_markup(False)
+            row.set_title("No Quill bindings found in bindings.lua")
+            row.set_subtitle("Run ./install.sh to add them")
+            self.shortcuts_expander.add_row(row)
+            self.shortcut_rows.append(row)
+
+        # The in-app keys are not bindings and cannot be changed here.
+        for chord, what in self.IN_APP_SHORTCUTS:
             row = Adw.ActionRow()
             row.set_use_markup(False)
             row.set_title(what)
@@ -487,30 +508,95 @@ class SettingsWindow(Adw.ApplicationWindow):
             label.add_css_class("monospace")
             label.add_css_class("dim-label")
             row.add_suffix(label)
-            expander.add_row(row)
+            self.shortcuts_expander.add_row(row)
+            self.shortcut_rows.append(row)
+
+    def _capture_chord(self, binding) -> None:
+        """Modal that waits for a real key press, then writes it out."""
+        dialog = Adw.AlertDialog(
+            heading=f"Change: {binding.label}",
+            body="Press the keys you want. Escape cancels.",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.set_close_response("cancel")
+
+        holder = {"chord": None}
+        preview = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        current = Gtk.Label(label=binding.chord)
+        current.add_css_class("title-4")
+        note = Gtk.Label(label="", wrap=True)
+        note.add_css_class("caption")
+        preview.append(current)
+        preview.append(note)
+        dialog.set_extra_child(preview)
+
+        def on_key(_c, keyval, _code, state):
+            from gi.repository import Gdk
+            if (Gdk.keyval_name(keyval) or "") == "Escape":
+                dialog.close()
+                return True
+            chord = keybindings.chord_from_event(keyval, state)
+            if chord is None:
+                return True            # still holding modifiers
+            clash = keybindings.is_bound_elsewhere(chord, binding)
+            current.set_label(chord)
+            if clash:
+                holder["chord"] = None
+                note.set_label(f"{chord} is already used by “{clash}”. Try another.")
+                note.remove_css_class("success")
+                note.add_css_class("error")
+            else:
+                holder["chord"] = chord
+                note.set_label("Press Enter to keep it, or try another.")
+                note.remove_css_class("error")
+                note.add_css_class("success")
+            if (Gdk.keyval_name(keyval) or "") in ("Return", "KP_Enter") and holder["chord"]:
+                dialog.close()
+                self._apply_chord(binding, holder["chord"])
+            return True
+
+        controller = Gtk.EventControllerKey()
+        # CAPTURE, so the dialog sees the chord before any widget acts on it.
+        controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        controller.connect("key-pressed", on_key)
+        dialog.add_controller(controller)
+        dialog.present(self)
+
+    def _apply_chord(self, binding, chord: str) -> None:
+        try:
+            keybindings.set_chord(binding, chord)
+        except OSError as exc:
+            self._toast(str(exc))
+            return
+        if keybindings.reload():
+            self._toast(f"{binding.label} is now {chord}")
+        else:
+            self._toast("Saved — run 'hyprctl reload' to apply")
+        self._fill_shortcut_rows()
+        self._refresh_hero()
+
+    def _refresh_hero(self) -> None:
+        """Repopulate the hero grid so its keycaps match what was just saved."""
+        if getattr(self, "hero_grid", None) is not None:
+            self._fill_hero()
 
     # -- provider ----------------------------------------------------------
     def _build_provider_group(self) -> None:
         group = Adw.PreferencesGroup(title="Where edits run")
         self.page.add(group)
 
-        self.provider_row = Adw.ComboRow(title="Provider")
-        self.provider_row.add_prefix(
-            Gtk.Image.new_from_icon_name("network-server-symbolic"))
         self.provider_order = [OLLAMA, OPENAI, CODEX, CLAUDECODE, OPENROUTER]
-        self.provider_row.set_model(Gtk.StringList.new([
-            "On this machine (Ollama)",
-            "OpenAI-compatible server",
-            "ChatGPT subscription (Codex CLI)",
-            "Claude subscription (Claude Code)",
-            "OpenRouter (cloud)",
-        ]))
-        try:
-            self.provider_row.set_selected(self.provider_order.index(self.cfg.provider))
-        except ValueError:
-            self.provider_row.set_selected(0)
-        self.provider_row.connect("notify::selected", lambda *_: self._sync_provider())
-        group.add(self.provider_row)
+        self._provider_id = (self.cfg.provider if self.cfg.provider in self.provider_order
+                             else OLLAMA)
+        options = [
+            (OLLAMA, "On this machine", "Ollama — nothing leaves this computer"),
+            (OPENAI, "OpenAI-compatible server", "LM Studio, llama.cpp, vLLM, or api.openai.com"),
+            (CODEX, "ChatGPT subscription", "Codex CLI — uses your plan, not API tokens"),
+            (CLAUDECODE, "Claude subscription", "Claude Code — uses your plan, not API tokens"),
+            (OPENROUTER, "OpenRouter", "Cloud, with a free tier"),
+        ]
+        self._radio_picker(group, options, self._provider_id,
+                           self._on_provider_picked)
 
         # These report state; they are not settings. Adding a non-row widget to
         # a PreferencesGroup places it below the card, which is exactly the
@@ -552,11 +638,12 @@ class SettingsWindow(Adw.ApplicationWindow):
         group.add(secondary)
 
 
+    def _on_provider_picked(self, value: str) -> None:
+        self._provider_id = value
+        self._sync_provider()
+
     def _provider_value(self) -> str:
-        index = self.provider_row.get_selected()
-        if 0 <= index < len(self.provider_order):
-            return self.provider_order[index]
-        return OLLAMA
+        return getattr(self, "_provider_id", OLLAMA)
 
     def _sync_provider(self) -> None:
         """Show only the backend in use.
