@@ -170,7 +170,6 @@ class SettingsWindow(Adw.ApplicationWindow):
         """Render "Super + Shift + I" as separate keys rather than a string."""
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
                       spacing=9 if large else 6)
-        box.set_halign(Gtk.Align.CENTER)
         # Room for the drop shadow, or the next widget clips it.
         box.set_margin_bottom(7 if large else 4)
         box.set_margin_top(2)
@@ -192,40 +191,46 @@ class SettingsWindow(Adw.ApplicationWindow):
         return box
 
     def _build_hero(self) -> None:
-        """The one thing to remember, at the size of the thing to remember."""
+        """Keys on the left, what they do on the right.
+
+        A two-column grid rather than a centred stack: the chords line up under
+        each other, and each description reads straight across from the keys it
+        belongs to instead of sitting underneath them.
+        """
         group = Adw.PreferencesGroup()
         self.page.add(group)
 
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        box.add_css_class("quill-hero")
-        box.set_halign(Gtk.Align.CENTER)
+        grid = Gtk.Grid()
+        grid.add_css_class("quill-hero")
+        grid.set_column_spacing(18)
+        grid.set_row_spacing(14)
+        grid.set_halign(Gtk.Align.CENTER)
 
         binds = hypr.binds_matching("quill")
         primary = next((c for c, w in binds if "menu" in w.lower()), "Super + I")
         secondary = next((c for c, w in binds if "menu" not in w.lower()), None)
 
-        box.append(self._keycaps(primary, large=True))
-
-        caption = Gtk.Label(label="Select text in any app, then press this")
-        caption.add_css_class("body")
-        caption.add_css_class("dim-label")
-        box.append(caption)
-
+        rows = [(primary, "Select text in any app, then press this", True)]
         if secondary:
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            row.set_halign(Gtk.Align.CENTER)
-            row.set_margin_top(14)
-            row.append(self._keycaps(secondary))
-            note = Gtk.Label(label="fix grammar in place, no popup")
-            note.add_css_class("caption")
-            note.add_css_class("dim-label")
-            note.set_valign(Gtk.Align.CENTER)
-            row.append(note)
-            box.append(row)
+            rows.append((secondary, "Fix grammar in place, without the popup", False))
 
-        group.add(box)
+        for index, (chord, text, large) in enumerate(rows):
+            keys = self._keycaps(chord, large=large)
+            keys.set_halign(Gtk.Align.END)
+            keys.set_valign(Gtk.Align.CENTER)
+            grid.attach(keys, 0, index, 1, 1)
 
-    # -- interactive tutorial ----------------------------------------------
+            label = Gtk.Label(label=text, xalign=0)
+            label.set_valign(Gtk.Align.CENTER)
+            if large:
+                label.add_css_class("title-4")
+            else:
+                label.add_css_class("caption")
+                label.add_css_class("dim-label")
+            grid.attach(label, 1, index, 1, 1)
+
+        group.add(grid)
+
     SAMPLE = "i has recieved you're mesage yesterday and we was gonna reply."
 
     def _build_tutorial(self) -> None:
