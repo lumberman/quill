@@ -1587,14 +1587,10 @@ class SettingsWindow(Adw.ApplicationWindow):
         box.append(add)
         self.actions_group.set_header_suffix(box)
 
-        self.trigger_rows: list[Adw.ActionRow] = []
         self.action_rows: list[Adw.ExpanderRow] = []
         self._rebuild_action_rows()
 
     def _rebuild_action_rows(self) -> None:
-        for row in getattr(self, "trigger_rows", []):
-            self.actions_group.remove(row)
-        self.trigger_rows = []
         for row in self.action_rows:
             self.actions_group.remove(row)
         self.action_rows = []
@@ -1607,36 +1603,10 @@ class SettingsWindow(Adw.ApplicationWindow):
             if key:
                 self._binds_by_action.setdefault(key, binding)
 
-        triggers = [b for b in self._binds if keybindings.is_menu_trigger(b)]
-        for binding in triggers:
-            row = Adw.ActionRow()
-            row.set_use_markup(False)
-            mouse = keybindings.is_pointer(binding.chord)
-            row.set_title("Open the popup")
-            row.set_subtitle("From the pointer" if mouse
-                             else "Choose any edit from the menu")
-            row.add_prefix(Gtk.Image.new_from_icon_name(
-                "input-mouse-symbolic" if mouse else "view-list-symbolic"))
-            self._attach_chord_controls(row, binding, None)
-            self.actions_group.add(row)
-            self.trigger_rows.append(row)
-
-        if not any(keybindings.is_pointer(b.chord) for b in triggers):
-            row = Adw.ActionRow()
-            row.set_use_markup(False)
-            row.set_title("Open the popup")
-            row.set_subtitle("From the pointer")
-            row.add_prefix(Gtk.Image.new_from_icon_name("input-mouse-symbolic"))
-            self._attach_chord_controls(row, None, None,
-                                        on_add=self._capture_new_trigger)
-            self.actions_group.add(row)
-            self.trigger_rows.append(row)
-
         for index, action in enumerate(self.draft_actions):
             self.actions_group.add(self._action_row(index, action))
 
-    def _attach_chord_controls(self, row, binding, action_id_for_new,
-                               on_add=None) -> None:
+    def _attach_chord_controls(self, row, binding, action_id_for_new) -> None:
         """Show the chord this row owns, with buttons to change or clear it."""
         if binding is not None:
             keys = self._keycaps(binding.chord)
@@ -1651,8 +1621,6 @@ class SettingsWindow(Adw.ApplicationWindow):
             change.connect("clicked", lambda _b, bind=binding: self._capture_chord(bind))
             row.add_suffix(change)
 
-            # Opening the popup is what Quill is for, so those two rows
-            # only offer Change. The per-edit shortcuts are extras.
             if action_id_for_new is not None:
                 clear = Gtk.Button(icon_name="edit-clear-symbolic")
                 clear.add_css_class("flat")
@@ -1668,18 +1636,9 @@ class SettingsWindow(Adw.ApplicationWindow):
                                            label="Add shortcut"))
         assign.add_css_class("flat")
         assign.set_valign(Gtk.Align.CENTER)
-        assign.connect(
-            "clicked",
-            lambda _b, aid=action_id_for_new: (on_add() if on_add
-                                               else self._capture_new_chord(aid)))
+        assign.connect("clicked",
+                       lambda _b, aid=action_id_for_new: self._capture_new_chord(aid))
         row.add_suffix(assign)
-
-    def _capture_new_trigger(self) -> None:
-        """Re-add a way to open the popup after one has been cleared."""
-        placeholder = keybindings.Binding(
-            chord="", description="Quill: Open the edit menu",
-            command=keybindings.quill_command("menu"), line=-1)
-        self._capture_chord(placeholder, creating=True)
 
     def _capture_new_chord(self, action_id: str) -> None:
         action = next((a for a in self.draft_actions if a.id == action_id), None)

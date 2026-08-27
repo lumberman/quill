@@ -111,10 +111,6 @@ def action_id(binding: Binding) -> str | None:
     return match.group(1) if match else None
 
 
-def is_menu_trigger(binding: Binding) -> bool:
-    return binding.command.rstrip().endswith("menu")
-
-
 def add(chord: str, description: str, command: str,
         path: Path | None = None) -> None:
     """Append a bind inside Quill's block. Raises OSError on failure."""

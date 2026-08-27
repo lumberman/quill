@@ -3,12 +3,10 @@
     python3 tests/test_chords.py
 
 "Change" used to send every shortcut through the key grabber, which can only
-produce a keyboard chord. Pressing it on the SUPER+SHIFT+right-click trigger
-therefore destroyed that trigger, and nothing in the window could bring a
-mouse binding back. Two smaller bugs came out with it: keycaps showed the raw
-"mouse:273", and the clash check compared bindings by description, so the two
-popup triggers -- which share one description -- could silently take each
-other's chord.
+produce a keyboard chord, so pressing it on a mouse binding destroyed that
+binding. Two smaller bugs came out with it: keycaps showed the raw
+"mouse:273", and the clash check compared bindings by description, so two
+bindings sharing one description could silently take each other's chord.
 """
 
 import shutil
@@ -21,7 +19,7 @@ BLOCK = """\
 -- >>> quill >>>
 o.bind("SUPER + I", "Quill: Open the edit menu", "/home/x/.local/bin/quill menu")
 o.bind("SUPER + SHIFT + mouse:273", "Quill: Open the edit menu", "/home/x/.local/bin/quill menu")
-o.bind("SUPER + SHIFT + I", "Quill: Fix grammar in place", "/home/x/.local/bin/quill run fix")
+o.bind("CTRL + ALT + mouse:274", "Quill: Fix grammar in place", "/home/x/.local/bin/quill run fix")
 -- <<< quill <<<
 """
 
@@ -45,8 +43,7 @@ def main() -> int:
     check("pointer chords are recognised", kb.is_pointer("SUPER + mouse:272"), True)
     check("key chords are not", kb.is_pointer("SUPER + M"), False)
 
-    # Identity is the chord, not the description: both popup triggers are
-    # described as "Quill: Open the edit menu".
+    # Identity is the chord, not the description.
     ptr = kb.Binding(chord="SUPER + SHIFT + mouse:273",
                      description="Quill: Open the edit menu",
                      command="quill menu", line=2)
@@ -58,23 +55,22 @@ def main() -> int:
         path = tmp / "bindings.lua"
         path.write_text(BLOCK, encoding="utf-8")
 
-        kb.set_chord(ptr, "CTRL + ALT + mouse:274", path=path)
-        after = [b.chord for b in kb.read(path) if kb.is_pointer(b.chord)]
+        # The per-edit shortcut rows are where a pointer chord can be edited.
+        fix = next(b for b in kb.read(path) if kb.action_id(b) == "fix")
+        kb.set_chord(fix, "CTRL + SHIFT + mouse:275", path=path)
         check("a pointer shortcut stays a pointer shortcut",
-              after, ["CTRL + ALT + mouse:274"])
-        check("nothing else moved", len(kb.read(path)), 3)
+              kb.read(path)[2].chord, "CTRL + SHIFT + mouse:275")
+        check("nothing else moved", [b.chord for b in kb.read(path)][:2],
+              ["SUPER + I", "SUPER + SHIFT + mouse:273"])
 
-        # Clearing the pointer trigger must be reversible from the window.
-        ptr = next(b for b in kb.read(path) if kb.is_pointer(b.chord))
-        kb.remove(ptr, path=path)
-        check("clearing leaves one trigger",
-              [b.chord for b in kb.read(path) if kb.is_menu_trigger(b)],
-              ["SUPER + I"])
-        kb.add("SUPER + SHIFT + mouse:273", "Quill: Open the edit menu",
-               "/home/x/.local/bin/quill menu", path=path)
+        # Those rows can clear a shortcut and take it back.
+        fix = next(b for b in kb.read(path) if kb.action_id(b) == "fix")
+        kb.remove(fix, path=path)
+        check("clearing drops just that bind", len(kb.read(path)), 2)
+        kb.add("CTRL + ALT + mouse:274", "Quill: Fix grammar in place",
+               "/home/x/.local/bin/quill run fix", path=path)
         check("and it can be added back",
-              [b.chord for b in kb.read(path) if kb.is_pointer(b.chord)],
-              ["SUPER + SHIFT + mouse:273"])
+              kb.read(path)[2].chord, "CTRL + ALT + mouse:274")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
