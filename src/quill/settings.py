@@ -31,7 +31,9 @@ from .config import CLAUDECODE, CODEX, OLLAMA, OPENAI, OPENROUTER, Config  # noq
 
 CSS = """
 .quill-hero {
-  padding: 22px 12px 18px 12px;
+  /* No side padding: the keycaps line up with the wordmark above and the
+     section titles below, which all sit at the page's own inset. */
+  padding: 20px 0 16px 0;
 }
 /* The tutorial is a section in its own right, not loose content under a
    heading, so it gets a container of its own. */
@@ -48,7 +50,7 @@ CSS = """
   letter-spacing: 0.4px;
 }
 .quill-secondary {
-  padding: 8px 4px 0 4px;
+  padding: 8px 0 0 0;
 }
 /* Keycaps. A thick border-bottom renders as a flange outside the rounded
    corners, so the depth comes from stacked box-shadows instead: one hard
@@ -355,10 +357,12 @@ class SettingsWindow(Adw.ApplicationWindow):
         picker = Gtk.Grid()
         picker.set_column_spacing(12)
         picker.set_row_spacing(8)
-        picker.set_margin_start(26)
+        # 24px is the step icon's width plus its spacing, so the keys line up
+        # under the step heading's text rather than floating mid-card.
+        picker.set_margin_start(24)
         for index, (chord, what) in enumerate(modes):
             keys = self._keycaps(chord)
-            keys.set_halign(Gtk.Align.END)
+            keys.set_halign(Gtk.Align.START)
             keys.set_valign(Gtk.Align.CENTER)
             picker.attach(keys, 0, index, 1, 1)
             label = Gtk.Label(label=what, xalign=0)
@@ -371,7 +375,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.reset_button = Gtk.Button(label="Reset the sample")
         self.reset_button.add_css_class("flat")
         self.reset_button.set_halign(Gtk.Align.START)
-        self.reset_button.set_margin_start(22)
+        self.reset_button.set_margin_start(12)
         self.reset_button.connect("clicked", lambda *_: self._reset_tutorial())
         self.step2_box.append(self.reset_button)
 
@@ -851,6 +855,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.openrouter_group.set_visible(active == OPENROUTER)
         self.openai_group.set_visible(active == OPENAI)
         self.codex_group.set_visible(active == CODEX)
+        self.codex_effort_group.set_visible(active == CODEX)
         self.claude_group.set_visible(active == CLAUDECODE)
         self.model_group.set_visible(active == OLLAMA)
 
@@ -1085,6 +1090,22 @@ class SettingsWindow(Adw.ApplicationWindow):
             if names else "The server reported no models"
         )
 
+    @staticmethod
+    def _caption_line(text: str, icon: str = "dialog-information-symbolic") -> Gtk.Box:
+        """Explanatory text under a card, at the weight of a footnote."""
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+        box.add_css_class("quill-secondary")
+        image = Gtk.Image.new_from_icon_name(icon)
+        image.set_valign(Gtk.Align.START)
+        image.add_css_class("dim-label")
+        label = Gtk.Label(label=text, xalign=0, wrap=True)
+        label.add_css_class("caption")
+        label.add_css_class("dim-label")
+        label.set_hexpand(True)
+        box.append(image)
+        box.append(label)
+        return box
+
     def _radio_picker(self, group, options, current, on_pick):
         """Always-visible radio rows. Same control as the model list."""
         first: Gtk.CheckButton | None = None
@@ -1132,10 +1153,10 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.claude_status_row = Adw.ActionRow()
         self.claude_status_row.set_use_markup(False)
         self.claude_status_row.set_title("Claude Code")
-        signin = Gtk.Button(label="Sign in")
-        signin.set_valign(Gtk.Align.CENTER)
-        signin.connect("clicked", lambda *_: self._claude_login())
-        self.claude_status_row.add_suffix(signin)
+        self.claude_signin = Gtk.Button(label="Sign in")
+        self.claude_signin.set_valign(Gtk.Align.CENTER)
+        self.claude_signin.connect("clicked", lambda *_: self._claude_login())
+        self.claude_status_row.add_suffix(self.claude_signin)
         self.claude_group.add(self.claude_status_row)
 
         self._claude_model = self.cfg.claude_model or claudecode.DEFAULT_MODEL
@@ -1154,6 +1175,7 @@ class SettingsWindow(Adw.ApplicationWindow):
 
     def _sync_claude_row(self) -> None:
         self.claude_status_row.set_subtitle(claudecode.describe())
+        self._style_signin(self.claude_signin, claudecode.signed_in())
 
     def _claude_login(self) -> None:
         exe = claudecode.binary()
@@ -1180,10 +1202,10 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.codex_status_row = Adw.ActionRow()
         self.codex_status_row.set_use_markup(False)
         self.codex_status_row.set_title("Codex CLI")
-        signin = Gtk.Button(label="Sign in")
-        signin.set_valign(Gtk.Align.CENTER)
-        signin.connect("clicked", lambda *_: self._codex_login())
-        self.codex_status_row.add_suffix(signin)
+        self.codex_signin = Gtk.Button(label="Sign in")
+        self.codex_signin.set_valign(Gtk.Align.CENTER)
+        self.codex_signin.connect("clicked", lambda *_: self._codex_login())
+        self.codex_status_row.add_suffix(self.codex_signin)
         self.codex_group.add(self.codex_status_row)
 
         self._codex_model = self.cfg.codex_model or codex.DEFAULT_MODEL
@@ -1200,6 +1222,15 @@ class SettingsWindow(Adw.ApplicationWindow):
              for m in codex.MODELS],
             self._codex_model, pick_model)
 
+        # A heading of its own. Stacked in one card, the model radios and the
+        # effort radios were six identical rows with no telling where one
+        # question ended and the next began.
+        self.codex_effort_group = Adw.PreferencesGroup(
+            title="How hard it thinks",
+            description="Editing needs no deliberation; higher settings only cost time.",
+        )
+        self.page.add(self.codex_effort_group)
+
         self._codex_effort = self.cfg.codex_effort or "low"
 
         def pick_effort(value):
@@ -1207,27 +1238,29 @@ class SettingsWindow(Adw.ApplicationWindow):
             self._refresh_status()
 
         self._radio_picker(
-            self.codex_group,
+            self.codex_effort_group,
             [(e, codex.EFFORT_LABELS.get(e, e),
               "Recommended for editing" if e == "low" else "")
              for e in codex.EFFORTS],
             self._codex_effort, pick_effort)
 
-        self.codex_model_row = Adw.EntryRow(title="Model override (advanced)")
-        self.codex_model_row.set_text("")
-
-        speed = Adw.ActionRow()
-        speed.set_use_markup(False)
-        speed.set_title("Note")
-        speed.set_subtitle(
+        # Advisory, not a setting. A row titled "Note" said nothing; below the
+        # card is where the other explanations in this window live.
+        self.codex_effort_group.add(self._caption_line(
             "Slower than the other backends — an agent process starts per edit, "
-            "so expect a few seconds, and the result appears all at once."
-        )
-        self.codex_group.add(speed)
+            "so expect a few seconds, and the result appears all at once."))
         self._sync_codex_row()
 
     def _sync_codex_row(self) -> None:
         self.codex_status_row.set_subtitle(codex.describe())
+        self._style_signin(self.codex_signin, codex.auth_mode() == "chatgpt")
+
+    @staticmethod
+    def _style_signin(button: Gtk.Button, signed_in: bool) -> None:
+        """A button offering something already done should not look urgent."""
+        button.set_label("Sign in again" if signed_in else "Sign in")
+        button.remove_css_class("suggested-action" if signed_in else "flat")
+        button.add_css_class("flat" if signed_in else "suggested-action")
 
     def _codex_login(self) -> None:
         # Codex owns this flow; launching its own login is better than
@@ -1285,9 +1318,13 @@ class SettingsWindow(Adw.ApplicationWindow):
         self.detail_box.append(detail_icon)
         self.detail_box.append(self.detail_label)
 
-        # Tuning knobs almost nobody touches, folded away by default.
+        # Tuning knobs almost nobody touches, folded away by default. The
+        # subtitle matters: there is a second "Advanced" further down, under
+        # Behaviour, and two identical titles tell the user nothing.
         advanced = Adw.ExpanderRow(title="Advanced")
+        advanced.set_subtitle("Ollama host, memory, context window")
         advanced.add_prefix(Gtk.Image.new_from_icon_name("preferences-system-symbolic"))
+        self.model_advanced = advanced
         group.add(advanced)
 
         self.host_row = Adw.EntryRow(title="Ollama host")
@@ -1372,6 +1409,14 @@ class SettingsWindow(Adw.ApplicationWindow):
                 if model == self._selected_id:
                     self.other_expander.set_expanded(True)
             self.model_group_card.add(self.other_expander)
+
+        # The group appends, and the model rows are built after Advanced was
+        # added, so without this the collapsed expander sits above the actual
+        # choice -- tuning ahead of the decision it belongs to.
+        advanced = getattr(self, "model_advanced", None)
+        if advanced is not None:
+            self.model_group_card.remove(advanced)
+            self.model_group_card.add(advanced)
 
         self._on_model_changed()
         self._sync_pull_row(installed)
@@ -1550,6 +1595,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         group.add(self.clipboard_row)
 
         advanced = Adw.ExpanderRow(title="Advanced")
+        advanced.set_subtitle("How long to wait for a reply")
         advanced.add_prefix(Gtk.Image.new_from_icon_name("preferences-system-symbolic"))
         group.add(advanced)
 
@@ -1670,33 +1716,19 @@ class SettingsWindow(Adw.ApplicationWindow):
         row.set_subtitle(action.id)
         self.action_rows.append(row)
 
+        bound = self._binds_by_action.get(action.id)
+        if bound is not None:
+            keys = self._keycaps(bound.chord)
+            keys.set_valign(Gtk.Align.CENTER)
+            row.add_suffix(keys)
+
         label_row = Adw.EntryRow(title="Label")
         label_row.set_text(action.label)
         label_row.connect("changed", lambda w, i=index: self._set_action(i, label=w.get_text()))
         label_row.connect("changed", lambda w, r=row: r.set_title(w.get_text() or "Untitled"))
         row.add_row(label_row)
 
-        instruction_row = Adw.ActionRow(title="Instruction")
-        instruction_row.set_activatable(False)
-        view = Gtk.TextView()
-        view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        view.set_size_request(-1, 96)
-        view.add_css_class("card")
-        view.set_top_margin(6)
-        view.set_bottom_margin(6)
-        view.set_left_margin(6)
-        view.set_right_margin(6)
-        buffer = view.get_buffer()
-        buffer.set_text(action.instruction)
-        buffer.connect("changed", lambda b, i=index: self._set_action(
-            i, instruction=b.get_text(*b.get_bounds(), False)))
-        scroller = Gtk.ScrolledWindow()
-        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroller.set_child(view)
-        scroller.set_margin_top(6)
-        scroller.set_margin_bottom(6)
-        instruction_row.set_child(scroller)
-        row.add_row(instruction_row)
+        row.add_row(self._instruction_row(index, action))
 
         temp_row = Adw.SpinRow(
             title="Temperature",
@@ -1723,31 +1755,110 @@ class SettingsWindow(Adw.ApplicationWindow):
         shortcut_row = Adw.ActionRow()
         shortcut_row.set_use_markup(False)
         shortcut_row.set_title("Shortcut")
-        shortcut_row.set_subtitle("Runs this edit directly, without the popup")
         self._attach_chord_controls(
             shortcut_row, self._binds_by_action.get(action.id), action.id)
         row.add_row(shortcut_row)
 
-        controls = Adw.ActionRow()
-        controls.set_activatable(False)
-        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        row.add_row(self._action_controls(index))
+        return row
+
+    def _instruction_row(self, index: int, action: Action) -> Adw.PreferencesRow:
+        """The prompt, labelled, and inset like every other row.
+
+        A bare AdwPreferencesRow rather than an AdwActionRow: set_child() on an
+        action row replaces its whole content, so the "Instruction" title was
+        being thrown away and the text box was left with no side padding at all.
+        """
+        holder = Adw.PreferencesRow()
+        holder.set_activatable(False)
+        holder.set_title("Instruction")
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        box.set_margin_top(10)
+        box.set_margin_bottom(12)
+
+        caption = Gtk.Label(label="Instruction", xalign=0)
+        caption.add_css_class("caption")
+        caption.add_css_class("dim-label")
+        box.append(caption)
+
+        view = Gtk.TextView()
+        view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        view.set_size_request(-1, 88)
+        view.set_top_margin(2)
+        view.set_bottom_margin(2)
+        buffer = view.get_buffer()
+        buffer.set_text(action.instruction)
+        buffer.connect("changed", lambda b, i=index: self._set_action(
+            i, instruction=b.get_text(*b.get_bounds(), False)))
+
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_child(view)
+
+        # The same outline the Playground's sample field uses, so an editable
+        # block of text looks the same wherever it appears.
+        frame = Gtk.Box()
+        frame.add_css_class("quill-sample-frame")
+        view.add_css_class("quill-sample")
+        scroller.set_hexpand(True)
+        frame.append(scroller)
+        box.append(frame)
+
+        holder.set_child(box)
+        return holder
+
+    def _action_controls(self, index: int) -> Adw.PreferencesRow:
+        """Reorder and delete, at the end of the row rather than the start.
+
+        Trailing, because they act on the whole edit and should not be the
+        first thing the eye lands on; flat, because a filled red button in a
+        row of quiet ones reads as the primary action here, which it is not.
+        """
+        holder = Adw.PreferencesRow()
+        holder.set_activatable(False)
+        holder.set_title("Reorder or delete")
+
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        buttons.set_margin_start(12)
+        buttons.set_margin_end(12)
         buttons.set_margin_top(6)
         buttons.set_margin_bottom(6)
+
+        where = Gtk.Label(
+            label=f"Position {index + 1} of {len(self.draft_actions)} in the popup",
+            xalign=0)
+        where.add_css_class("caption")
+        where.add_css_class("dim-label")
+        where.set_hexpand(True)
+        where.set_valign(Gtk.Align.CENTER)
+        buttons.append(where)
+
         up = Gtk.Button(icon_name="go-up-symbolic")
+        up.add_css_class("flat")
+        up.set_tooltip_text("Move up in the popup")
         up.set_sensitive(index > 0)
         up.connect("clicked", lambda *_, i=index: self._move_action(i, -1))
+
         down = Gtk.Button(icon_name="go-down-symbolic")
+        down.add_css_class("flat")
+        down.set_tooltip_text("Move down in the popup")
         down.set_sensitive(index < len(self.draft_actions) - 1)
         down.connect("clicked", lambda *_, i=index: self._move_action(i, 1))
+
         remove = Gtk.Button(icon_name="user-trash-symbolic")
-        remove.add_css_class("destructive-action")
+        remove.add_css_class("flat")
+        remove.add_css_class("error")
+        remove.set_tooltip_text("Remove this edit")
+        remove.set_margin_start(8)
         remove.connect("clicked", lambda *_, i=index: self._remove_action(i))
-        buttons.append(up)
-        buttons.append(down)
-        buttons.append(remove)
-        controls.set_child(buttons)
-        row.add_row(controls)
-        return row
+
+        for button in (up, down, remove):
+            buttons.append(button)
+        holder.set_child(buttons)
+        return holder
 
     def _set_action(self, index: int, **fields) -> None:
         if 0 <= index < len(self.draft_actions):
@@ -1800,8 +1911,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         cfg.openai_base_url = self._openai_base_url()
         cfg.openai_model = (self.openai_model_row.get_text().strip()
                             or self.cfg.openai_model)
-        cfg.codex_model = (self.codex_model_row.get_text().strip()
-                           or getattr(self, "_codex_model", cfg.codex_model))
+        cfg.codex_model = getattr(self, "_codex_model", cfg.codex_model)
         cfg.codex_effort = getattr(self, "_codex_effort", cfg.codex_effort)
         cfg.claude_model = getattr(self, "_claude_model", cfg.claude_model)
         cfg.host = self.host_row.get_text().strip() or self.cfg.host

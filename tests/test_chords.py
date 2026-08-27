@@ -36,10 +36,11 @@ def check(label: str, got, want) -> None:
 
 def main() -> int:
     check("mouse:273 reads as Right-click",
-          kb.pretty("SUPER + SHIFT + mouse:273"), "SUPER + SHIFT + Right-click")
+          kb.pretty("SUPER + SHIFT + mouse:273"), "Super + Shift + Right-click")
     check("wheel names survive", kb.pretty_key("mouse_down"), "Wheel down")
-    check("keys are left alone", kb.pretty("SUPER + I"), "SUPER + I")
-    check("no stray spacing", kb.pretty("SUPER+I"), "SUPER + I")
+    check("modifiers are title-cased", kb.pretty("SUPER + I"), "Super + I")
+    check("plain keys are left alone", kb.pretty("CTRL + F5"), "Ctrl + F5")
+    check("no stray spacing", kb.pretty("SUPER+I"), "Super + I")
     check("pointer chords are recognised", kb.is_pointer("SUPER + mouse:272"), True)
     check("key chords are not", kb.is_pointer("SUPER + M"), False)
 

@@ -167,8 +167,19 @@ _MOUSE_LABELS = {
 }
 
 def pretty_key(part: str) -> str:
-    """A key name a human can read: "mouse:273" -> "Right-click"."""
-    return _MOUSE_LABELS.get(part.strip().lower(), part)
+    """A key name a human can read: "mouse:273" -> "Right-click".
+
+    Modifiers come back title-cased. bindings.lua writes SUPER while the
+    compositor reports Super, so the same chord rendered from the two sources
+    produced two different keycaps in the same window.
+    """
+    part = part.strip()
+    mouse = _MOUSE_LABELS.get(part.lower())
+    if mouse:
+        return mouse
+    if part.upper() in MOD_ORDER:
+        return part.capitalize()
+    return part
 
 
 def pretty(chord: str) -> str:
