@@ -57,8 +57,11 @@ class SettingsWindow(Adw.ApplicationWindow):
 
         save = Gtk.Button(label="Save")
         save.add_css_class("suggested-action")
+        save.set_tooltip_text("Save (Ctrl+S)")
         save.connect("clicked", self._on_save)
         header.pack_end(save)
+
+        self._install_shortcuts()
 
         toolbar.add_top_bar(header)
         toolbar.set_content(self.toasts)
@@ -126,6 +129,25 @@ class SettingsWindow(Adw.ApplicationWindow):
             cap.set_valign(Gtk.Align.CENTER)
             box.append(cap)
         return box
+
+    def _install_shortcuts(self) -> None:
+        """Window-level keys, so the whole panel is usable without a mouse.
+
+        MANAGED scope rather than a key controller on the window: a capture
+        handler would swallow Escape and Ctrl+S from entries and text views,
+        and these have to fire wherever focus happens to be.
+        """
+        controller = Gtk.ShortcutController()
+        controller.set_scope(Gtk.ShortcutScope.MANAGED)
+        for accelerator, callback in (
+            ("Escape", lambda *_: (self.close(), True)[1]),
+            ("<Control>w", lambda *_: (self.close(), True)[1]),
+            ("<Control>s", lambda *_: (self._on_save(None), True)[1]),
+        ):
+            controller.add_shortcut(Gtk.Shortcut(
+                trigger=Gtk.ShortcutTrigger.parse_string(accelerator),
+                action=Gtk.CallbackAction.new(callback)))
+        self.add_controller(controller)
 
     def _build_brand(self) -> None:
         """Mark, name, and a line of tracked capitals saying where it stands.
@@ -253,6 +275,9 @@ class SettingsWindow(Adw.ApplicationWindow):
 
         self.sample_view = Gtk.TextView()
         self.sample_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        # Tab moves on. A text view that swallows Tab is a keyboard trap:
+        # focus entered this field and could never leave it again.
+        self.sample_view.set_accepts_tab(False)
         self.sample_view.add_css_class("quill-sample")
         # Multiline on purpose: selecting a phrase out of a paragraph is the
         # real case, not selecting one tidy sentence.
@@ -1088,6 +1113,8 @@ class SettingsWindow(Adw.ApplicationWindow):
         """
         holder = Adw.PreferencesRow()
         holder.set_activatable(False)
+        # The holder carries the buttons; it is not a stop of its own.
+        holder.set_focusable(False)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         box.set_margin_start(4)
         box.set_margin_end(4)
@@ -1744,6 +1771,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         """
         holder = Adw.PreferencesRow()
         holder.set_activatable(False)
+        holder.set_focusable(False)
         holder.set_title("Instruction")
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -1759,6 +1787,7 @@ class SettingsWindow(Adw.ApplicationWindow):
 
         view = Gtk.TextView()
         view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        view.set_accepts_tab(False)
         view.set_size_request(-1, 88)
         view.set_top_margin(2)
         view.set_bottom_margin(2)
@@ -1792,6 +1821,7 @@ class SettingsWindow(Adw.ApplicationWindow):
         """
         holder = Adw.PreferencesRow()
         holder.set_activatable(False)
+        holder.set_focusable(False)
         holder.set_title("Reorder or delete")
 
         buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)

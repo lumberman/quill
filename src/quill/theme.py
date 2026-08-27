@@ -456,6 +456,15 @@ row.activatable:hover {{
 row.activatable:active {{
   background-color: alpha(@window_fg_color, 0.18);
 }}
+row:focus-visible, row:focus-within {{
+  outline: 2px solid @accent_color;
+  outline-offset: -2px;
+  border-radius: {small}px;
+}}
+button:focus-visible, .quill-segment button:focus-visible {{
+  outline: 2px solid @accent_color;
+  outline-offset: 1px;
+}}
 row.quill-current {{
   background-color: alpha(@window_fg_color, 0.09);
   box-shadow: inset 0 0 0 1px alpha(@window_fg_color, 0.20);

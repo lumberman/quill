@@ -363,6 +363,16 @@ Changes apply on **Save**; closing the window discards them. Saving rewrites
 settings themselves survive. If you would rather keep a commented file, edit it
 by hand and leave this window alone.
 
+### Without a mouse
+
+Tab and Shift+Tab walk every control; the arrow keys move between rows inside
+a section, which is the quicker way to pick a provider or a model. Return
+picks the focused row or opens a disclosure; Space flips a switch or a
+segmented button. **Ctrl+S** saves, **Escape** or **Ctrl+W** closes.
+
+The focused row is outlined in the theme's accent colour, which is distinct
+from the filled row that marks the current choice.
+
 ## It wears your Omarchy theme
 
 Quill has no appearance settings, because it takes them from your desktop.
