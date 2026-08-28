@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from . import __version__
+
 NAME = "Quill"
 TAGLINE = "Rewrite or spellcheck any text, without leaving the app"
 
@@ -12,9 +14,10 @@ TAGLINE = "Rewrite or spellcheck any text, without leaving the app"
 #: Bluetooth, "MAX 5X" under Claude Code.
 SHORT = "AI text checker"
 
-#: Kept in step with shell-plugin/manifest.json, which is the only other
-#: place a Quill version is written down.
-VERSION = "1.0.0"
+#: Read from the package rather than repeated here: the two had already
+#: drifted, so the settings header was showing 1.0.0 while the package said
+#: 0.1.0.
+VERSION = __version__
 
 _ICON = Path(__file__).resolve().parent.parent.parent / "share" / "icons" / "quill.svg"
 
