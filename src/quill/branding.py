@@ -7,6 +7,15 @@ from pathlib import Path
 NAME = "Quill"
 TAGLINE = "Rewrite or spellcheck any text, without leaving the app"
 
+#: What it is, in the two or three words that go under the wordmark. The
+#: shell's panels all carry one of these -- "UNTANGLING WIRES" under
+#: Bluetooth, "MAX 5X" under Claude Code.
+SHORT = "AI text checker"
+
+#: Kept in step with shell-plugin/manifest.json, which is the only other
+#: place a Quill version is written down.
+VERSION = "1.0.0"
+
 _ICON = Path(__file__).resolve().parent.parent.parent / "share" / "icons" / "quill.svg"
 
 

@@ -15,7 +15,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 from gi.repository import Gtk4LayerShell as LayerShell  # noqa: E402
 
-from . import clipboard, hypr, provider, sanitize, state  # noqa: E402
+from . import clipboard, hypr, provider, sanitize, state, style  # noqa: E402
 from .actions import Action, build_messages  # noqa: E402
 from .config import Config  # noqa: E402
 
@@ -24,50 +24,8 @@ RESULT_WIDTH = 560
 RESULT_HEIGHT = 420
 EDGE_PAD = 12
 
-CSS = """
-window.quill { background: transparent; }
-
-.quill-card {
-  background-color: @theme_bg_color;
-  border: 1px solid alpha(currentColor, 0.16);
-  border-radius: 12px;
-  box-shadow: 0 8px 28px alpha(black, 0.45);
-}
-
-.quill-header {
-  padding: 10px 14px 6px 14px;
-  border-bottom: 1px solid alpha(currentColor, 0.10);
-}
-
-.quill-snippet { font-size: 0.85em; opacity: 0.72; }
-.quill-meta { font-size: 0.78em; opacity: 0.5; }
-
-.quill-list { background: transparent; padding: 6px; }
-
-.quill-list row {
-  border-radius: 8px;
-  padding: 7px 10px;
-  min-height: 0;
-}
-.quill-list row:selected { background-color: alpha(@accent_bg_color, 0.9); }
-
-.quill-key {
-  font-family: monospace;
-  font-size: 0.78em;
-  opacity: 0.42;
-  min-width: 14px;
-}
-
-.quill-footer {
-  padding: 8px 12px;
-  border-top: 1px solid alpha(currentColor, 0.10);
-}
-
-.quill-result { font-size: 0.95em; }
-.quill-result text { background: transparent; }
-
-.quill-error { color: @error_color; font-size: 0.86em; }
-"""
+# The stylesheet lives in theme.py with the settings window's: one sheet,
+# painted in the current Omarchy theme, installed by style.apply().
 
 
 def _snippet(text: str, limit: int = 90) -> str:
@@ -461,15 +419,7 @@ def run(cfg: Config, text: str, win: dict | None, saved_clipboard: str | None) -
                           flags=Gio.ApplicationFlags.NON_UNIQUE)
 
     def on_activate(application):
-        # Named css_provider, not provider: the module of that name is
-        # imported at the top and shadowing it here is a trap.
-        css_provider = Gtk.CssProvider()
-        css_provider.load_from_data(CSS.encode("utf-8"))
-        display = Gdk.Display.get_default()
-        if display is not None:
-            Gtk.StyleContext.add_provider_for_display(
-                display, css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-            )
+        style.apply()
         window = QuillWindow(application, cfg, text, win, saved_clipboard)
         window.present()
         window.listbox.grab_focus()
