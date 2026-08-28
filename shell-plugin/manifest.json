@@ -4,7 +4,7 @@
   "name": "Quill",
   "version": "1.0.0",
   "author": "Vlad Mitkovsky",
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "description": "Rewrite or spellcheck the selected text with a local model",
   "kinds": [
     "bar-widget"

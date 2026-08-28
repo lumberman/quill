@@ -479,6 +479,15 @@ within `keep_alive` are fast.
 **An edit takes tens of seconds and returns nothing** — the model is reasoning
 instead of answering. Check `think` is not set to `true` in your config.
 
+## Licence
+
+GPL-3.0-or-later. See [LICENSE](LICENSE).
+
+Use it, change it, share it. The one condition: if you distribute a modified
+Quill, you have to ship your source under the same licence. You may charge for
+it — the GPL allows that — but whoever pays gets the source and is free to pass
+it on, so Quill cannot be turned into a closed product.
+
 ## Development
 
 ```bash
