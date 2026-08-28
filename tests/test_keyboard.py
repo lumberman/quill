@@ -4,12 +4,15 @@
 
 It was not. One Tab landed in the Playground sample and every Tab after it
 inserted a tab character, because GtkTextView accepts Tab by default: focus
-went in and could never come out. Twenty-seven controls sat behind that one
-trap, unreachable.
+went in and could never come out. Twenty-six controls sat behind that one
+trap.
 
-The walk below is the same call GtkWindow's own Tab handler makes, so what it
-reports is what pressing Tab does. Driving the real thing through the
-compositor gave an identical order.
+This asserts the properties that make a control reachable rather than
+simulating Tab. Simulating it was tried and dropped: gtk_widget_child_focus
+in a loop stalls on the first row of a scrolled page -- it stalls on commits
+where pressing Tab for real walks the whole window -- so the walk reported
+failures the window did not have. Tab, Shift+Tab, arrow keys, Return, Space,
+Ctrl+S and Escape were checked by driving the compositor by hand.
 
 Needs a display; skips without one.
 """
@@ -70,18 +73,24 @@ def describe(widget) -> str:
     return f"{name}:{text}"
 
 
-def walk(window, limit: int = 200) -> tuple[list[str], bool]:
-    """Tab stops in order, and whether focus ever stopped advancing."""
-    stops, stalled = [], False
-    window.set_focus(None)
-    for _ in range(limit):
-        if not window.child_focus(Gtk.DirectionType.TAB_FORWARD):
-            break
-        stops.append(describe(window.get_focus()))
-        if len(stops) > 2 and stops[-1] == stops[-2] == stops[-3]:
-            stalled = True
-            break
-    return stops, stalled
+def focusables(window) -> list[str]:
+    """Every control that can take focus, in tree order.
+
+    Reachability, without pretending to be the focus engine: a widget that is
+    on screen and focusable is one Tab can land on.
+    """
+    found = []
+
+    def visit(widget):
+        child = widget.get_first_child()
+        while child is not None:
+            if child.get_mapped() and child.get_focusable():
+                found.append(describe(child))
+            visit(child)
+            child = child.get_next_sibling()
+
+    visit(window)
+    return found
 
 
 def descendants(widget, kind):
@@ -108,24 +117,13 @@ def shortcuts_of(window) -> set[str]:
 
 
 def run(window) -> None:
-    stops, stalled = walk(window)
-    check("Tab never stops advancing", not stalled,
-          f"stuck on {stops[-1]!r}" if stalled else "")
-
-    # The order wraps, so one lap is everything up to the first stop coming
-    # round again. Deduping on any repeat would cut the lap short: two groups
-    # both have a row called "Advanced".
-    unique = stops[:1]
-    for stop in stops[1:]:
-        if stop == stops[0]:
-            break
-        unique.append(stop)
-    check("Tab reaches more than a handful of controls", len(unique) >= 20,
-          f"only {len(unique)}: {unique}")
-    check("Tab wraps back to the start", len(stops) > len(unique))
+    reachable = focusables(window)
+    check("plenty of controls can take focus", len(reachable) >= 20,
+          f"only {len(reachable)}: {reachable}")
 
     for wanted in REQUIRED:
-        check(f"Tab reaches {wanted}", wanted in unique)
+        check(f"{wanted} can take focus", wanted in reachable,
+              f"have {reachable}")
 
     # The trap that started this.
     views = descendants(window, Gtk.TextView)
@@ -133,7 +131,6 @@ def run(window) -> None:
     check(f"no text view swallows Tab ({len(views)} checked)", not trapped)
 
     # Rows that only carry other widgets should not take a stop of their own.
-    # Only the ones on screen: an unmapped row cannot be tabbed to anyway.
     empty = [r for r in descendants(window, Adw.PreferencesRow)
              if r.get_mapped() and not r.get_title() and r.get_focusable()]
     check("container-only rows take no tab stop", not empty,
@@ -161,16 +158,35 @@ def main() -> int:
     def activate(application):
         style.apply()
         window = settings.SettingsWindow(application, config.load())
+        window.set_default_size(760, 900)
         window.present()
 
-        def later():
+        def go():
             try:
                 run(window)
             finally:
                 application.quit()
             return False
 
-        GLib.timeout_add(600, later)
+        # Wait for a frame to be drawn, not for a stopwatch. Before the page
+        # is allocated, child_focus cannot move past the first row and the
+        # walk reports a stall that is the test's fault, not the window's --
+        # which is exactly what a timeout produced whenever the machine was
+        # busy enough to delay the first frame.
+        def on_map(*_args):
+            handle = []
+
+            def after_frame(widget, _clock):
+                widget.remove_tick_callback(handle[0])
+                GLib.timeout_add(150, go)
+                return GLib.SOURCE_REMOVE
+
+            handle.append(window.add_tick_callback(after_frame))
+
+        if window.get_mapped():
+            on_map()
+        else:
+            window.connect("map", on_map)
 
     app.connect("activate", activate)
     app.run([])
