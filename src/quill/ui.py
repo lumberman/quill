@@ -41,6 +41,8 @@ class QuillWindow(Adw.ApplicationWindow):
         self.source_text = text
         self.target_window = win
         self.saved_clipboard = saved_clipboard
+        # Set when a paste was refused, so auto-replace cannot fire again.
+        self._replace_refused = False
         self.cancel_event: threading.Event | None = None
         self.current_action: Action | None = None
         self.current_custom = ""
@@ -344,7 +346,7 @@ class QuillWindow(Adw.ApplicationWindow):
         self.result_buffer.set_text(final)
         self.status_label.set_label("⏎ to replace")
         self.replace_button.set_sensitive(True)
-        if self.cfg.auto_replace:
+        if self.cfg.auto_replace and not self._replace_refused:
             self._on_replace()
             return False
         self.replace_button.grab_focus()
@@ -373,7 +375,13 @@ class QuillWindow(Adw.ApplicationWindow):
     def _on_copy(self) -> None:
         text = self._result_text()
         if text.strip():
-            clipboard.set_clipboard(text)
+            if not clipboard.set_clipboard(text):
+                # Keep the panel open: it may hold the only copy.
+                self.status_label.set_label("Not copied")
+                self.error_label.set_label(
+                    "Could not copy. The result is still here.")
+                self.error_label.set_visible(True)
+                return
             hypr.notify("Copied to clipboard")
         self._dismiss(restore_clipboard=False)
 
@@ -388,13 +396,27 @@ class QuillWindow(Adw.ApplicationWindow):
         GLib.timeout_add(60, self._do_replace, text)
 
     def _do_replace(self, text: str) -> bool:
-        clipboard.replace_selection(
+        replaced = clipboard.replace_selection(
             text,
             self.target_window,
             self.saved_clipboard,
             restore_clipboard=self.cfg.restore_clipboard,
         )
-        self.get_application().quit()
+        if replaced:
+            self.get_application().quit()
+            return False
+        # Paste was not confirmed. Keep the result and stop auto-replace
+        # from firing again on a retry.
+        self._replace_refused = True
+        self.stack.set_visible_child_name("result")
+        self.status_label.set_label("Not replaced")
+        self.error_label.set_label(
+            "Could not confirm the paste. "
+            "Copy the result instead."
+        )
+        self.error_label.set_visible(True)
+        self.replace_button.set_sensitive(True)
+        self.present()
         return False
 
     def _close_surface(self) -> None:
@@ -403,10 +425,10 @@ class QuillWindow(Adw.ApplicationWindow):
     def _dismiss(self, restore_clipboard: bool = True) -> None:
         self._cancel_stream()
         self._close_surface()
-        # capture_selection may have overwritten the clipboard via the copy
-        # fallback; put it back even when the user changes their mind.
-        if restore_clipboard and self.cfg.restore_clipboard and self.saved_clipboard is not None:
-            clipboard.set_clipboard(self.saved_clipboard)
+        # Synthetic Copy may have changed the clipboard. Restore only while
+        # the text Quill captured is still offered.
+        if restore_clipboard and self.cfg.restore_clipboard:
+            clipboard.restore_capture_if_owned(self.saved_clipboard)
         app = self.get_application()
         if app is not None:
             app.quit()

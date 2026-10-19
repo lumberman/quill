@@ -15,14 +15,18 @@ import time
 _TERMINAL_TAG = "terminal"
 
 
-def _run(args: list[str], timeout: float = 3.0) -> str:
+def _run_result(args: list[str], timeout: float = 3.0):
     try:
-        out = subprocess.run(
+        return subprocess.run(
             args, capture_output=True, text=True, timeout=timeout, check=False
         )
-        return out.stdout
     except (subprocess.SubprocessError, OSError):
-        return ""
+        return None
+
+
+def _run(args: list[str], timeout: float = 3.0) -> str:
+    result = _run_result(args, timeout)
+    return result.stdout if result is not None else ""
 
 
 def _json(args: list[str]):
@@ -91,15 +95,17 @@ def is_terminal(win: dict | None) -> bool:
 
 def dispatch(expr: str) -> bool:
     """Run a Lua dispatcher expression. Returns True when Hyprland accepted it."""
-    out = _run(["hyprctl", "dispatch", expr])
-    return "error" not in out.lower()
+    result = _run_result(["hyprctl", "dispatch", expr])
+    return (result is not None and result.returncode == 0
+            and "error" not in result.stdout.lower()
+            and "error" not in result.stderr.lower())
 
 
 def _lua_str(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def send_shortcut(mods: str, key: str, hold_s: float = 0.05) -> None:
+def send_shortcut(mods: str, key: str, hold_s: float = 0.05) -> bool:
     """Inject a chord into whatever surface currently has keyboard focus.
 
     Uses send_key_state's explicit down/up split rather than send_shortcut:
@@ -111,9 +117,10 @@ def send_shortcut(mods: str, key: str, hold_s: float = 0.05) -> None:
     layer-shell surfaces, not just normal windows.
     """
     spec = f'{{ mods = {_lua_str(mods)}, key = {_lua_str(key)}, state = %s }}'
-    dispatch(f"hl.dsp.send_key_state({spec % _lua_str('down')})")
+    down = dispatch(f"hl.dsp.send_key_state({spec % _lua_str('down')})")
     time.sleep(hold_s)
-    dispatch(f"hl.dsp.send_key_state({spec % _lua_str('up')})")
+    up = dispatch(f"hl.dsp.send_key_state({spec % _lua_str('up')})")
+    return down and up
 
 
 def focus_window(address: str) -> bool:
@@ -122,7 +129,9 @@ def focus_window(address: str) -> bool:
         return False
     if dispatch(f'hl.dsp.focus({{ window = "address:{address}" }})'):
         return True
-    return bool(_run(["hyprctl", "dispatch", "focuswindow", f"address:{address}"]))
+    out = _run(["hyprctl", "dispatch", "focuswindow",
+                f"address:{address}"])
+    return bool(out.strip()) and "error" not in out.lower()
 
 
 def notify(summary: str, body: str = "", urgency: str = "normal",

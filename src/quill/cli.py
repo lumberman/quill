@@ -8,6 +8,7 @@ import os
 import time
 import signal
 import sys
+import tempfile
 import threading
 from pathlib import Path
 
@@ -32,6 +33,22 @@ def _runtime_dir() -> Path:
 
 def _pid_file() -> Path:
     return _runtime_dir() / "menu.pid"
+
+
+def _save_draft(text: str) -> Path | None:
+    """Keep an unpasted result in a new owner-only file."""
+    try:
+        folder = _runtime_dir()
+        # /tmp/quill is the fallback and may belong to someone else.
+        if folder.stat().st_uid != os.getuid():
+            return None
+        fd, name = tempfile.mkstemp(prefix="draft-", suffix=".txt",
+                                    dir=folder)
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            out.write(text)
+    except OSError:
+        return None
+    return Path(name)
 
 
 def _dismiss_existing() -> bool:
@@ -75,8 +92,8 @@ def cmd_menu(args, cfg: Config) -> int:
             hypr.notify("Quill: nothing selected", "Select some text, then try again.")
             return 1
         if not _preflight(cfg):
-            if saved is not None and cfg.restore_clipboard:
-                clipboard.set_clipboard(saved)
+            if cfg.restore_clipboard:
+                clipboard.restore_capture_if_owned(saved)
             return 1
 
         from . import ui  # imported lazily so non-GUI commands stay light
@@ -104,6 +121,7 @@ def cmd_run(args, cfg: Config) -> int:
         hypr.notify("Quill: nothing selected", "Select some text, then try again.")
         return 1
     if not _preflight(cfg):
+        clipboard.restore_capture_if_owned(saved)
         return 1
 
     # Ask before starting: once the request is in flight this process is
@@ -129,26 +147,43 @@ def cmd_run(args, cfg: Config) -> int:
         with state.working(action.label):
             chunks = list(provider.stream_chat(cfg, messages, action.temperature))
     except provider.ProviderError as exc:
+        clipboard.restore_capture_if_owned(saved)
         hypr.notify(f"{action.label} failed", str(exc), urgency="critical",
                     replace_id=notice)
         return 1
 
     result = sanitize.clean_output("".join(chunks), text)
     if not result.strip():
+        clipboard.restore_capture_if_owned(saved)
         hypr.notify("The model returned nothing",
                     f"Your text was left alone · {provider.label(cfg)}",
                     urgency="critical", replace_id=notice)
         return 1
 
     if result.strip() == text.strip():
+        clipboard.restore_capture_if_owned(saved)
         # Say so, or a no-op looks identical to a failure.
         hypr.notify("Nothing to change",
                     f"{action.label} found no errors · {provider.label(cfg)}",
                     replace_id=notice, transient=True, timeout_ms=3000)
         return 0
 
-    clipboard.replace_selection(result, win, saved,
-                                restore_clipboard=cfg.restore_clipboard)
+    if not clipboard.replace_selection(
+            result, win, saved,
+            restore_clipboard=cfg.restore_clipboard):
+        # Never lose a finished edit, and never take the clipboard
+        # to rescue it: keep a private draft, say so, then print it.
+        draft = _save_draft(result)
+        where = (f"Saved to {draft}" if draft
+                 else "Printed to stdout only")
+        hypr.notify(f"{action.label} · not replaced",
+                    f"Could not confirm the paste. {where}.",
+                    urgency="critical", replace_id=notice)
+        try:
+            print(result)
+        except (OSError, ValueError):
+            pass
+        return 1
 
     if not quiet:
         # Say what changed, not just that something did. With auto-replace on

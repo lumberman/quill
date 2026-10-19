@@ -131,6 +131,9 @@ On the result panel the text is **editable** — fix a near-miss in place rather
 than re-running. `⏎` or **Replace** pastes over your selection, **Copy** puts it
 on the clipboard, **Retry** re-runs the same edit.
 
+If Quill cannot paste safely, the panel reopens with the result and
+an error. Auto-replace stays off until the panel closes.
+
 ## Invisible mode
 
 `SUPER + SHIFT + I` runs one edit straight over the selection. No popup, no
@@ -156,6 +159,25 @@ o.bind("SUPER + ALT + I", "Quill: Make it shorter",
 ```
 
 Add `--quiet` to drop the notification, e.g. for scripts.
+
+Quill pastes only after Hyprland confirms the original window has
+focus and the clipboard reads back the result. It refuses before
+writing when the clipboard offers no text type, is empty, or cannot
+be read. Offers with any text type, including some file lists, count
+as text, and only their plain text is put back. Putting it back is
+best effort. On refusal you get a notification even with `--quiet`,
+and the command exits 1. The result goes to stdout and, when
+possible, to a new owner-only `draft-*.txt` in
+`$XDG_RUNTIME_DIR/quill/`. Delete old drafts when you are done.
+
+For apps without PRIMARY selection support, Quill checks that the
+original window is active before and after sending Copy. If Copy
+changes the clipboard, a refused replacement restores the earlier
+text only while the copied text is still offered. Quill reports a
+replacement as successful only when Hyprland accepts both key events.
+An accepted chord does not prove that the target app pasted it.
+If focus moves during Copy, Quill refuses the selection and leaves the
+current clipboard offer alone because it could be a newer user copy.
 
 ## Bar icon
 
