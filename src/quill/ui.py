@@ -45,6 +45,9 @@ class QuillWindow(Adw.ApplicationWindow):
         self.current_action: Action | None = None
         self.current_custom = ""
         self._result_chars: list[str] = []
+        # Bumped by every cancel, so callbacks an older worker already
+        # queued see a stale id and do nothing.
+        self._request_id = 0
 
         self.add_css_class("quill")
         self.set_decorated(False)
@@ -311,24 +314,28 @@ class QuillWindow(Adw.ApplicationWindow):
         messages = build_messages(action, self.source_text, self.current_custom)
         thread = threading.Thread(
             target=self._stream_worker,
-            args=(messages, action.temperature, self.cancel_event),
+            args=(messages, action.temperature, self.cancel_event,
+                  self._request_id),
             daemon=True,
         )
         thread.start()
 
-    def _stream_worker(self, messages, temperature, cancel) -> None:
+    def _stream_worker(self, messages, temperature, cancel,
+                       request: int) -> None:
         try:
             for delta in provider.stream_chat(self.cfg, messages, temperature, cancel):
                 if cancel.is_set():
                     return
-                GLib.idle_add(self._append_delta, delta)
+                GLib.idle_add(self._append_delta, request, delta)
         except provider.ProviderError as exc:
-            GLib.idle_add(self._on_stream_error, str(exc))
+            GLib.idle_add(self._on_stream_error, request, str(exc))
             return
         if not cancel.is_set():
-            GLib.idle_add(self._on_stream_done)
+            GLib.idle_add(self._on_stream_done, request)
 
-    def _append_delta(self, delta: str) -> bool:
+    def _append_delta(self, request: int, delta: str) -> bool:
+        if request != self._request_id:
+            return False
         self._result_chars.append(delta)
         # Sanitise as we go so reasoning blocks never flash on screen.
         shown = sanitize.clean_output("".join(self._result_chars))
@@ -337,7 +344,9 @@ class QuillWindow(Adw.ApplicationWindow):
         self.result_view.scroll_to_iter(end, 0.0, False, 0.0, 0.0)
         return False
 
-    def _on_stream_done(self) -> bool:
+    def _on_stream_done(self, request: int) -> bool:
+        if request != self._request_id:
+            return False
         state.write(state.IDLE)
         self.spinner.stop()
         final = sanitize.clean_output("".join(self._result_chars), self.source_text)
@@ -350,7 +359,9 @@ class QuillWindow(Adw.ApplicationWindow):
         self.replace_button.grab_focus()
         return False
 
-    def _on_stream_error(self, message: str) -> bool:
+    def _on_stream_error(self, request: int, message: str) -> bool:
+        if request != self._request_id:
+            return False
         state.write(state.IDLE)
         self.spinner.stop()
         self.status_label.set_label("Failed")
@@ -360,6 +371,7 @@ class QuillWindow(Adw.ApplicationWindow):
         return False
 
     def _cancel_stream(self) -> None:
+        self._request_id += 1
         state.write(state.IDLE)
         if self.cancel_event is not None:
             self.cancel_event.set()
